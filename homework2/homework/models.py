@@ -6,6 +6,7 @@ This will be useful for tuning model hyperparameters such as hidden_dim, num_lay
 but remember that the grader will assume the default constructor!
 """
 
+from ctypes import resize
 from pathlib import Path
 
 import torch
@@ -216,18 +217,40 @@ class MLPClassifierDeepResidual(nn.Module):
         """
         super().__init__()
         # Calculate the input size after flattening
-        self.layers = nn.ModuleList([
-            BasicBlock(3, 16),
-            BasicBlock(16, 32),
-            BasicBlock(32, 64),
-            BasicBlock(64, 64)  # Last block can keep the same number of channels
-        ])
-        self.fc = nn.Linear(64, num_classes)
-
-        # Calculate output size after the last convolutional layer
-        self.output_height = h // 2  # Adjust based on the number of downsampling operations
-        self.output_width = w // 2    # Adjust based on the number of downsampling operations
         
+        self.input_size = 3 * h * w  # Assuming RGB images
+
+        hidden_dim = [128*2/2**(i) for i in range(1,num_layers) if 128*2/2**(i)>=num_classes]
+        
+        # Create a list to hold the layers
+        layers = []
+        
+        # Input layer
+        layers.append(nn.Linear(self.input_size, int(hidden_dim[0])))
+        layers.append(nn.BatchNorm1d(int(hidden_dim[0])))
+        layers.append(nn.ReLU())
+        
+        # Hidden layers
+        for i in range(1,num_layers - 1):
+            layers.append(nn.Linear(int(hidden_dim[i-1]), int(hidden_dim[i])))
+            # layers.append(nn.Linear(self.input_size, sexlf.input_size))
+            layers.append(nn.BatchNorm1d(int(hidden_dim[i])))
+            layers.append(nn.ReLU())
+        
+        # Output layer
+        self.output = (nn.Linear(int(hidden_dim[-1]), num_classes))
+        self.output_ori = (nn.Linear(self.input_size, num_classes))
+
+        # Combine all layers into a Sequential module
+        self.model = nn.Sequential(*layers)
+        
+
+        
+        # self.proj = nn.Linear(int(hidden_dim[-1]),self.input_size)
+        self.proj = nn.Linear(self.input_size,int(hidden_dim[-1]))
+        self.proj_ori = nn.Linear(int(hidden_dim[-1]),self.input_size)
+        
+
 
         # raise NotImplementedError("MLPClassifierDeepResidual.__init__() is not implemented")
 
@@ -239,6 +262,31 @@ class MLPClassifierDeepResidual(nn.Module):
         Returns:
             tensor (b, num_classes) logits
         """
+        
+        # Flatten the input tensor
+        x = x.view(x.size(0), -1)  # (b, 3*H*W)
+        short_cut = x
+        x = self.model(x)
+        resize_short_cut = self.proj(short_cut)
+        resize_x = self.proj_ori(x)
+        
+        # x = x.add(resize_short_cut)
+        # resize projected x to original size
+        x = resize_x.add(short_cut)
+        
+
+        # output = self.output(x)
+        output = (self.output_ori(x))
+      
+        
+        # resize_x+=short_cut
+        # output = self.output(resize_x)
+        # output = nn.ReLU(x+resize_short_cut)
+        # Forward pass through the model
+        
+        return output
+                
+        
         # Flatten the input tensor
         # x = x.view(x.size(0), -1)  # (b, 3*H*W)
         # residual = x 
@@ -321,14 +369,15 @@ class MLPClassifierDeepResidual(nn.Module):
             
         x = self.layers[-1](x)'''  # Output layer
         
+        '''trial 6
         for layer in self.layers:
             x = layer(x)
         x = nn.functional.adaptive_avg_pool2d(x, (1, 1))  # Global Average Pooling
         x = x.view(x.size(0), -1)  # Flatten
         logits = self.fc(x)
-        return logits
+        return logits'''
         
-                
+        
         
         # Forward pass through the model
         # return self.output_layer(x)
