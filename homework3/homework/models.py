@@ -128,21 +128,71 @@ class Detector(torch.nn.Module):
          # Feature extractor (shared layers)
          # Define the convolutional layers for feature extraction
 
-        
-        # Downsampling layers
-        self.down_conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1)  # (B, 16, 48, 64)
-        self.down_conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1) # (B, 32, 24, 32)
-        
-        # Up-sampling layers
-        self.up_conv1 = nn.ConvTranspose2d(32, 16, kernel_size=2, stride=2)    # (B, 16, 48, 64)
-        self.up_conv2 = nn.ConvTranspose2d(16, 16, kernel_size=2, stride=2)     # (B, 16, 96, 128)
-        
-        # Final layers for logits and depth
-        self.logits_conv = nn.Conv2d(16, 3, kernel_size=1)                     # (B, 3, 96, 128)
-        self.depth_conv = nn.Conv2d(16, 1, kernel_size=1)                      # (B, 1, 96, 128)
+        # Define the DownBlock for downsampling
+        class DownBlock(nn.Module):
+            def __init__(self, in_channels, out_channels):
+                super(DownBlock, self).__init__()
+                self.conv = nn.Sequential(
+                    nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+                    nn.ReLU(inplace=True),
+                    nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+                    nn.ReLU(inplace=True)
+                )
+                self.downsample = nn.Conv2d(out_channels, out_channels, kernel_size=1, stride=2)
 
-        # Activation
-        self.relu = nn.ReLU()
+            def forward(self, x):
+                x = self.conv(x)
+                return self.downsample(x)
+
+        # Define the UpBlock for upsampling
+        class UpBlock(nn.Module):
+            def __init__(self, in_channels, out_channels):
+                super(UpBlock, self).__init__()
+                stride = 2
+                self.upconv = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=stride)
+                self.conv = nn.Sequential(
+                    nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+                    nn.ReLU(inplace=True)
+                )
+                self.skip = torch.nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, padding=0) if in_channels != out_channels else torch.nn.Identity()
+
+            def forward(self, x, skip_connection):
+                x0 = x
+                x = self.upconv(x)
+                x = self.conv(x)
+                skip = self.skip(skip_connection)
+                return skip + x
+                #return self.skip(x0) + x 
+
+        self.approach = 1
+        if self.approach ==1 : #not using up and down network
+            # Downsampling layers
+            self.down_conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1)  # (B, 16, 48, 64)
+            self.down_conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1) # (B, 32, 24, 32)
+            
+            # Up-sampling layers
+            self.up_conv1 = nn.ConvTranspose2d(32, 16, kernel_size=2, stride=2)    # (B, 16, 48, 64)
+            self.up_conv2 = nn.ConvTranspose2d(16, 16, kernel_size=2, stride=2)     # (B, 16, 96, 128)
+            
+            # Final layers for logits and depth
+            self.logits_conv = nn.Conv2d(16, 3, kernel_size=1)                     # (B, 3, 96, 128)
+            self.depth_conv = nn.Conv2d(16, 1, kernel_size=1)                      # (B, 1, 96, 128)
+
+            # Activation
+            self.relu = nn.ReLU()
+        elif self.approach ==2:
+            # Feature extractor (shared layers)
+            self.down1 = DownBlock(in_channels, 32)  # First down block outputs 32 channels
+            self.down2 = DownBlock(32, 64)            # Second down block outputs 64 channels
+
+            # Up-sampling layers
+            self.up1 = UpBlock(64, 32)  # Up sampling from 64 channels to 32 channels
+            self.up2 = UpBlock(32, 16)   # Up sampling from 32 channels to 16 channels
+
+            # Final layers for logits and depth
+            self.logits_conv = nn.Conv2d(16, num_classes, kernel_size=1)
+            self.depth_conv = nn.Conv2d(16, 1, kernel_size=1)
+
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -162,22 +212,35 @@ class Detector(torch.nn.Module):
 
         # TODO: replace with actual forward pass
         
-        # Down-sampling path
-        z1 = self.relu(self.down_conv1(z))  # Down1
-        z2 = self.relu(self.down_conv2(z1)) # Down2
-        
-        # Up-sampling path
-        z3 = self.up_conv1(z2)  # Up1
-        z4 = self.relu(z3 + z1)  # Skip connection with Down1
-        z5 = self.up_conv2(z4)  # Up2
-        
-        # Logits and Depth output
-        logits = self.logits_conv(z5)  # (B, 3, 96, 128)
-        depth = self.depth_conv(z5)     # (B, 1, 96, 128)
+        if self.approach ==1: 
+            # Down-sampling path
+            z1 = self.relu(self.down_conv1(z))  # Down1
+            z2 = self.relu(self.down_conv2(z1)) # Down2
+            
+            # Up-sampling path
+            z3 = self.up_conv1(z2)  # Up1
+            z4 = self.relu(z3 + z1)  # Skip connection with Down1
+            z5 = self.up_conv2(z4)  # Up2
+            
+            # Logits and Depth output
+            logits = self.logits_conv(z5)  # (B, 3, 96, 128)
+            depth = self.depth_conv(z5)     # (B, 1, 96, 128)
 
-        raw_depth = depth.squeeze(1)  # (B, 96, 128)
+            raw_depth = depth.squeeze(1)  # (B, 96, 128)
+        elif self.approach ==2:
+                # Down-sampling path
+            z1 = self.down1(z)  # Down1, outputs 32 channels
+            z2 = self.down2(z1) # Down2, outputs 64 channels
 
+            # Up-sampling path
+            z3 = self.up1(z2, z1)  # Up1 with skip connection from Down1
+            z4 = self.up2(z3, z1)  # Up2 with skip connection from Down1 (or z3 depending on your design)
 
+            # Logits and Depth output
+            logits = self.logits_conv(z4)  # (B, num_classes, 96, 128)
+            depth = self.depth_conv(z4)     # (B, 1, 96, 128)
+
+            raw_depth = depth.squeeze(1)  # (B, 96, 128)
 
         return logits, raw_depth
 

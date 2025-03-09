@@ -1,14 +1,15 @@
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
-from homework.models import load_model, save_model
+from models import load_model, save_model
 import numpy as np
-from homework.datasets.classification_dataset import load_data
-from homework.metrics import AccuracyMetric
+from datasets.classification_dataset import load_data
+from metrics import AccuracyMetric
 
 #tensorboard --logdir runs --bind_all --reuse_port True
 
-def train(models = 'classifier',epochs = 10, batch_size = 256, lr = 0.005, weight_decay = 1e-4):
+def train(models = 'classifier',epochs = 20, batch_size = 256, lr = 1e-3, weight_decay = 1e-4):
+    init_acc = 0 
     ## Let's setup the dataloaders
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -24,7 +25,7 @@ def train(models = 'classifier',epochs = 10, batch_size = 256, lr = 0.005, weigh
     
     size = (64,64)
     model = load_model(models,with_weights=False) #.to(device)
-    writer = SummaryWriter()
+    writer = SummaryWriter('logs')
     writer.add_graph(model, torch.zeros(1, 3, *size))
     writer.add_images("train_images", torch.stack([train_dataset[i][0] for i in range(32)]))
     # writer.flush()
@@ -87,7 +88,7 @@ def train(models = 'classifier',epochs = 10, batch_size = 256, lr = 0.005, weigh
                 valid_am.add(pred, label)
 
         valid_am_m = valid_am.compute()
-        writer.add_scalar('valid/M_accruacy', valid_am_m['accuracy'], epoch)
+        writer.add_scalar('train/M_accruacy', valid_am_m['accuracy'], epoch)
         valid_M = valid_am_m['accuracy']
         writer.add_scalar("valid/accuracy", np.mean(valid_accuracy), epoch)
         avg_valid_accuracy = np.mean(valid_accuracy)
@@ -98,14 +99,16 @@ def train(models = 'classifier',epochs = 10, batch_size = 256, lr = 0.005, weigh
         print(f"Epoch [{epoch + 1}/{epochs}] - Train Accuracy: {train_M:.4f}, Valid Accuracy: {valid_M:.4f}")
 
         ## Early stopping
-        if epoch % 10 == 0:
-            torch.save(net.state_dict(), f"model_{epoch}.pth")
-            
+        # if epoch % 10 == 0:
+        #     torch.save(net.state_dict(), f"model_{epoch}.pth")
     
-    
-        save_model(net)
+        if init_acc < valid_M: #save model if val accuracy is highest
+            save_model(net)
+        
     
 if __name__ == "__main__":
-    train(models="classifier",
-    epochs=1,
-    lr=1e-3)
+    train(
+    models="classifier",
+    epochs=20,
+    lr=1e-3,
+)
