@@ -165,13 +165,6 @@ class Detector(torch.nn.Module):
                 x = torch.cat([x, skip], dim=1)  # Concatenate along the channel dimension
                 return self.conv(x)
 
-        # # Downsampling layers
-        # self.down1 = nn.Conv2d(in_channels, 16, kernel_size=3, stride=2, padding=1)  # Down1
-        # self.down2 = nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1)  # Down2
-        
-        # # Upsampling layers
-        # self.up1 = nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1)  # Up1
-        
         
          # Feature extractor (shared layers)
         self.down1 = DownBlock(in_channels, 16)  # Output: (B, 16, 96, 128)
@@ -206,26 +199,7 @@ class Detector(torch.nn.Module):
         logits = torch.randn(x.size(0), 3, x.size(2), x.size(3))
         raw_depth = torch.rand(x.size(0), x.size(2), x.size(3))
 
-        # Downsampling
-        # x = self.down1(x)  # (B, 16, 48, 64)
-        # x = nn.ReLU()(x)
         
-        # x = self.down2(x)  # (B, 32, 24, 32)
-        # x = nn.ReLU()(x)
-        
-        # # Upsampling
-        # x_up = self.up1(x)  # (B, 16, 48, 64)
-        # x_up = nn.ReLU()(x_up)
-
-        # logits = self.up2(x_up)  # (B, num_classes, 96, 128)
-        
-        # # Depth output
-        # raw_depth = self.depth_layer(x_up)  # (B, 1, 96, 128)
-        # raw_depth = raw_depth.squeeze(1)
-
-        # Downsampling
-        
-        # Downsampling
         
         # Downsampling
         skip1, down1_out = self.down1(z)  # (B, 16, 96, 128)
