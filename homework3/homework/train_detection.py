@@ -6,8 +6,6 @@ from torch.utils.tensorboard import SummaryWriter
 from homework.models import load_model, save_model
 import numpy as np
 from homework.datasets.road_dataset import load_data
-
-
 from homework.metrics import DetectionMetric, AccuracyMetric
 
 #tensorboard --logdir runs --bind_all --reuse_port True
@@ -24,10 +22,9 @@ def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_
         device = torch.device("cpu")
 
 
-    train_dataset = load_data(train_dataset, transform_pipeline='default', return_dataloader=False)
-    valid_dataset = load_data(valid_dataset, transform_pipeline='default', return_dataloader=False)
+    train_dataset = load_data('./drive_data/train', transform_pipeline='default', return_dataloader=False,shuffle=True)
+    valid_dataset = load_data('./drive_data/val', transform_pipeline='default', return_dataloader=False,shuffle=False)
 
-    train_dataset
     size = (96, 128)
     model = load_model(models,with_weights=False) #.to(device)
     writer = SummaryWriter()
@@ -40,12 +37,10 @@ def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_
 
     optim = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=weight_decay)
 
-    train_loader = torch.utils.data.DataLoader('./drive_data/train', batch_size=batch_size, shuffle=True, num_workers=8)
-    valid_loader = torch.utils.data.DataLoader('./drive_data/val', batch_size=batch_size, num_workers=8)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8)
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size, num_workers=8)
 
     global_step = 0
-    train_accuracies = []
-    valid_accuracies = []
 
     # Create instances of the metric classes
     train_accuracy_metric = DetectionMetric(num_classes=3)
@@ -56,9 +51,7 @@ def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_
         val_accuracy_metric.reset()
 
         net.train()
-        train_accuracy = []
-        seg_accuracy = []
-        depth_accuracy = []
+        
         total_loss = 0.0
         for batch in train_loader:
             images = batch["image"]
@@ -104,8 +97,8 @@ def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_
         # train_detection_metrics = train_detection_metric.compute()
         writer.add_scalar('detec_train/accruacy', train_acc_metrics["accuracy"], epoch)
         writer.add_scalar("detec_train/iou", train_acc_metrics["iou"], epoch)
-        writer.add_scalar("detect_train/depth_error", train_acc_metrics["abs_depth_error"], epoch)
-        writer.add_scalar("detect_train/depth_error_lane", train_acc_metrics["tp_depth_error"], epoch)
+        writer.add_scalar("detec_train/depth_error", train_acc_metrics["abs_depth_error"], epoch)
+        writer.add_scalar("detec_train/depth_error_lane", train_acc_metrics["tp_depth_error"], epoch)
         t_acc,t_iou,t_depth,t_depth_lane = train_acc_metrics['accuracy'],train_acc_metrics['iou'],train_acc_metrics['abs_depth_error'],train_acc_metrics['tp_depth_error']
         
         writer.flush()
@@ -136,8 +129,8 @@ def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_
         v_acc,v_iou,v_depth,v_depth_lane = val_acc_metrics['accuracy'],val_acc_metrics['iou'],val_acc_metrics['abs_depth_error'],val_acc_metrics['tp_depth_error']
         writer.add_scalar('detec_val/accruacy', val_acc_metrics["accuracy"], epoch)
         writer.add_scalar("detec_val/iou", val_acc_metrics["iou"], epoch)
-        writer.add_scalar("detect_val/depth_error", val_acc_metrics["abs_depth_error"], epoch)
-        writer.add_scalar("detect_val/depth_error_lane", val_acc_metrics["tp_depth_error"], epoch)
+        writer.add_scalar("detec_val/depth_error", val_acc_metrics["abs_depth_error"], epoch)
+        writer.add_scalar("detec_val/depth_error_lane", val_acc_metrics["tp_depth_error"], epoch)
         
         
         # writer.add_scalar("valid/accuracy", np.mean(valid_accuracy), epoch)
@@ -150,10 +143,10 @@ def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_
         if epoch % 10 == 0:
             torch.save(net.state_dict(), f"model_{epoch}.pth")
             
-    
- 
+  
+        save_model(net)
 
 if __name__ == "__main__":
     train(models="detector",
-    epochs=30,
+    epochs=10,
     lr=1e-3)
