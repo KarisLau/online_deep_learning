@@ -127,57 +127,22 @@ class Detector(torch.nn.Module):
         # TODO: implement
          # Feature extractor (shared layers)
          # Define the convolutional layers for feature extraction
-        
-        class DownBlock(nn.Module):
-            def __init__(self, in_channels, out_channels):
-                super(DownBlock, self).__init__()
-                self.conv = nn.Sequential(
-                    nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-                    nn.ReLU(inplace=True),
-                    nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-                    nn.ReLU(inplace=True)
-                )
-                # Stride for downsampling
-                self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
-
-            def forward(self, x):
-                x = self.conv(x)
-                return x, self.pool(x)  # Return both the convoluted output and the downsampled output
-
-        class UpBlock(nn.Module):
-            def __init__(self, in_channels, out_channels):
-                super(UpBlock, self).__init__()
-                self.upconv = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
-                self.conv = nn.Sequential(
-                    nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-                    nn.ReLU(inplace=True),
-                    nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-                    nn.ReLU(inplace=True)
-                )
-
-            def forward(self, x, skip):
-                x = self.upconv(x)
-
-                # Convert sizes to tuples for comparison
-                if (x.size(2), x.size(3)) != (skip.size(2), skip.size(3)):
-                    x = nn.functional.interpolate(x, size=(skip.size(2), skip.size(3)), mode='bilinear', align_corners=False)
-
-                x = torch.cat([x, skip], dim=1)  # Concatenate along the channel dimension
-                return self.conv(x)
 
         
-         # Feature extractor (shared layers)
-        self.down1 = DownBlock(in_channels, 16)  # Output: (B, 16, 96, 128)
-        self.down2 = DownBlock(16, 32)            # Output: (B, 32, 48, 64)
-        self.down3 = DownBlock(32, 64)            # Output: (B, 64, 24, 32)
+        # Downsampling layers
+        self.down_conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1)  # (B, 16, 48, 64)
+        self.down_conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1) # (B, 32, 24, 32)
+        
+        # Up-sampling layers
+        self.up_conv1 = nn.ConvTranspose2d(32, 16, kernel_size=2, stride=2)    # (B, 16, 48, 64)
+        self.up_conv2 = nn.ConvTranspose2d(16, 16, kernel_size=2, stride=2)     # (B, 16, 96, 128)
+        
+        # Final layers for logits and depth
+        self.logits_conv = nn.Conv2d(16, 3, kernel_size=1)                     # (B, 3, 96, 128)
+        self.depth_conv = nn.Conv2d(16, 1, kernel_size=1)                      # (B, 1, 96, 128)
 
-        self.up1 = UpBlock(64, 32)                # Output: (B, 32, 48, 64)
-        self.up2 = UpBlock(32, 16)                # Output: (B, 16, 96, 128)
-
-        # Final layers
-        self.logits_layer = nn.Conv2d(16, num_classes, kernel_size=1)  # Output: (B, num_classes, 96, 128)
-        self.depth_layer = nn.Conv2d(16, 1, kernel_size=1)             # Output: (B, 96, 128)
-        pass
+        # Activation
+        self.relu = nn.ReLU()
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -196,22 +161,22 @@ class Detector(torch.nn.Module):
         z = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
 
         # TODO: replace with actual forward pass
-        logits = torch.randn(x.size(0), 3, x.size(2), x.size(3))
-        raw_depth = torch.rand(x.size(0), x.size(2), x.size(3))
-
         
+        # Down-sampling path
+        z1 = self.relu(self.down_conv1(z))  # Down1
+        z2 = self.relu(self.down_conv2(z1)) # Down2
         
-        # Downsampling
-        skip1, down1_out = self.down1(z)  # (B, 16, 96, 128)
-        skip2, down2_out = self.down2(down1_out)  # (B, 32, 48, 64)
-        bottleneck, _ = self.down3(down2_out)  # (B, 64, 24, 32)
+        # Up-sampling path
+        z3 = self.up_conv1(z2)  # Up1
+        z4 = self.relu(z3 + z1)  # Skip connection with Down1
+        z5 = self.up_conv2(z4)  # Up2
+        
+        # Logits and Depth output
+        logits = self.logits_conv(z5)  # (B, 3, 96, 128)
+        depth = self.depth_conv(z5)     # (B, 1, 96, 128)
 
-        # Upsampling with skip connections
-        x_up1 = self.up1(bottleneck, skip2)  # (B, 32, 48, 64)
-        x_up2 = self.up2(x_up1, skip1)  # (B, 16, 96, 128)
+        raw_depth = depth.squeeze(1)  # (B, 96, 128)
 
-        logits = self.logits_layer(x_up2)  # (B, num_classes, 96, 128)
-        raw_depth = self.depth_layer(x_up2).squeeze(1)  # (B, 96, 128)
 
 
         return logits, raw_depth
@@ -339,49 +304,12 @@ def debug_model(batch_size: int = 1):
     # output = model(sample_batch)
     # print(f"Output shape: {output.shape}")
     model = load_model("detector", in_channels=3, num_classes=3).to(device)
-    pred, depth = model(sample_batch)
-    print(f'pred shape: {pred.shape}')
+    logit, depth = model(sample_batch)
+    pred,depth = model.predict(sample_batch)
+    print(f'logit shape: {logit.shape}')
     print(f'depth shape: {depth.shape}')
+    print(f'pred shape: {pred.shape}')
     
-    
-    
-
-    # def calculate_iou(prediction, target, num_classes):
-    #     """
-    #     Calculate the Intersection over Union (IoU) for each class.
-
-    #     Args:
-    #         prediction (torch.Tensor): Predicted segmentation mask (HxW) with class indices.
-    #         target (torch.Tensor): Ground truth segmentation mask (HxW) with class indices.
-    #         num_classes (int): Number of classes.
-
-    #     Returns:
-    #         iou (torch.Tensor): IoU for each class.
-    #     """
-    #     iou = torch.zeros(num_classes)
-    #     for cls in range(num_classes):
-    #         pred_mask = (prediction == cls).float()
-    #         target_mask = (target == cls).float()
-            
-    #         intersection = torch.sum(pred_mask * target_mask)
-    #         union = torch.sum(pred_mask) + torch.sum(target_mask) - intersection
-            
-    #         iou[cls] = intersection / (union + 1e-6)  # Avoid division by zero
-
-    #     return iou
-
-    # # Generate a dummy target tensor for testing
-    # target = sample_batch #torch.randint(0, 6, (batch_size, 64, 64)).to(device)
-
-    # # Convert output logits to class predictions
-    # predictions = output.argmax(dim=1).view(batch_size, 1, 1, -1).expand(-1, 1, 64, 64)  # Reshape for IoU calculation
-
-    # # Calculate IoU
-    # iou = calculate_iou(predictions.squeeze(1), target, num_classes=6)
-
-
-
-    # should output logits (b, num_classes)
     
     
 

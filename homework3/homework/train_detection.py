@@ -3,19 +3,19 @@ import torchvision
 from torch.utils.tensorboard import SummaryWriter
 # from fire import Fire
 # import classification_data.train
-from homework.models import load_model, save_model
+from models import load_model, save_model
 import numpy as np
-from homework.datasets.road_dataset import load_data
+from datasets.road_dataset import load_data
 import matplotlib.pyplot as plt
 import time
 import pickle
+from metrics import DetectionMetric, AccuracyMetric
 
 #tensorboard --logdir runs --bind_all --reuse_port True
 
 def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_decay = 1e-4,seg_loss_weight =0.5):
     ## Let's setup the dataloaders
     timestamps = time.time()
-
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
@@ -23,21 +23,22 @@ def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_
     else:
         print("CUDA not available, using CPU")
         device = torch.device("cpu")
-    
 
-    train_dataset = load_data('./drive_data/train', transform_pipeline='default', return_dataloader=False)
-    valid_dataset = load_data('./drive_data/val', transform_pipeline='default', return_dataloader=False)
-    
+
+    train_dataset = load_data(train_dataset, transform_pipeline='default', return_dataloader=False)
+    valid_dataset = load_data(valid_dataset, transform_pipeline='default', return_dataloader=False)
+
+    train_dataset
     size = (96, 128)
     model = load_model(models,with_weights=False) #.to(device)
     writer = SummaryWriter()
     writer.add_graph(model, torch.zeros(1, 3, *size))
-    #writer.add_images("train_images", torch.stack([train_dataset[i][0] for i in range(32)]))
+
     # writer.flush()
 
     net = model
     net.to(device)
-    
+
     optim = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=weight_decay)
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8)
@@ -47,83 +48,104 @@ def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_
     train_accuracies = []
     valid_accuracies = []
 
-    
+    # Create instances of the metric classes
+    train_accuracy_metric = DetectionMetric(num_classes=3)
+    val_accuracy_metric = DetectionMetric(num_classes=3)
+
     for epoch in range(epochs):
+        train_accuracy_metric.reset()
+        val_accuracy_metric.reset()
 
         net.train()
         train_accuracy = []
         seg_accuracy = []
         depth_accuracy = []
         total_loss = 0.0
-        # output_loss = 0.0
-        # dpeth_loss = 0.0
-        for data, label in train_loader:
-            data, label = data.to(device), label.to(device)
-            logits, depth_preds = net(data)
-            # loss = torch.nn.functional.cross_entropy(output, label)
-               # Compute losses
-            seg_loss = torch.nn.functional.cross_entropy(logits, label)  # labels should be of shape (B, 96, 128)
-            depth_loss = torch.nn.functional.mse_loss(depth_preds, depth_preds)      # depths should be of shape (B, 96, 128)
-            loss = seg_loss_weight * seg_loss + (1-seg_loss_weight) * depth_loss
-            seg_accuracy.extend((logits.argmax(dim=-1) == label).cpu().detach().float().numpy())
-            depth_accuracy.extend((depth_preds.argmax(dim=-1) == label).cpu().detach().float().numpy())
-            total_loss += loss.item()
+        for batch in train_loader:
+            images = batch["image"]
+            depths = batch["depth"]
+            tracks = batch["track"]
+            images, tracks, depths = images.to(device), tracks.to(device),depths.to(device)
 
+            # Zero the gradients
             optim.zero_grad()
+
+            # Forward pass
+            logits,raw_depth = net(images)
+            
+            # Compute the losses
+            loss_segmentation = torch.nn.functional.cross_entropy(logits, tracks)
+            loss_depth = torch.nn.functional.mse_loss(raw_depth, depths)      # depths should be of shape (B, 96, 128)
+            
+            # criterion_segmentation(logits, tracks)  # Assuming `tracks` are the ground truth labels
+            # loss_depth = criterion_depth(raw_depth, depths)
+
+            # Total loss
+            loss = loss_segmentation*seg_loss_weight + loss_depth*(1-seg_loss_weight)
+
+            # Backward pass
             loss.backward()
             optim.step()
 
+            # Compute the metrics
+            pred,raw_depth = net.predict(images)
+            train_accuracy_metric.add(pred, tracks, raw_depth, depths)
+            # train_detection_metric.update(logits, tracks)
 
-            '''classification code 
-            loss = torch.nn.functional.cross_entropy(output, label)
-            train_accuracy.extend((output.argmax(dim=-1) == label).cpu().detach().float().numpy())
+            # Update the total loss
             total_loss += loss.item()
 
-            optim.zero_grad()
-            loss.backward()
-            optim.step()
-
-            writer.add_scalar("train/loss", loss.item(), global_step=global_step)
-            global_step += 1'''
-
-            writer.add_scalar("detection_train/seg_loss", seg_loss.item(), global_step=global_step)
-            writer.add_scalar("detection_train/depth_loss", depth_loss.item(), global_step=global_step)
-            writer.add_scalar("detection_train/loss", loss.item(), global_step=global_step)
+            # Update the global step
             global_step += 1
 
-        writer.add_scalar("detection_train/accuracy", np.mean(train_accuracy), epoch)
-        avg_train_loss = total_loss / len(train_loader)
-        avg_train_accuracy = np.mean(train_accuracy)
-        train_accuracies.append(avg_train_accuracy)
+            # Log the metrics
+            writer.add_scalar("detec_train/Loss", loss.item(), global_step)
+            
+        train_acc_metrics = train_accuracy_metric.compute()
+        # train_detection_metrics = train_detection_metric.compute()
+        writer.add_scalar('detec_train/accruacy', train_acc_metrics["accuracy"], epoch)
+        writer.add_scalar("detec_train/iou", train_acc_metrics["iou"], epoch)
+        writer.add_scalar("detect_train/depth_error", train_acc_metrics["abs_depth_error"], epoch)
+        writer.add_scalar("detect_train/depth_error_lane", train_acc_metrics["tp_depth_error"], epoch)
+        t_acc,t_iou,t_depth,t_depth_lane = train_acc_metrics['accuracy'],train_acc_metrics['iou'],train_acc_metrics['abs_depth_error'],train_acc_metrics['tp_depth_error']
+        
+        writer.flush()
 
         net.eval()
         valid_accuracy = []
         with torch.inference_mode(): 
-            for data, label in valid_loader:
-                data, label = data.to(device), label.to(device)
-                with torch.inference_mode():
-                    logits = net(data)
+            for batch in valid_loader:
+                images = batch["image"]
+                tracks = batch["track"]
+                depths = batch["depth"]
+                images, tracks, depths = images.to(device), tracks.to(device),depths.to(device)
 
-                valid_accuracy.extend((logits.argmax(dim=-1) == label).cpu().detach().float().numpy())
+                pred,raw_depth = net.predict(images)
 
+                # Compute the metrics
+                val_accuracy_metric.add(pred, tracks, raw_depth, depths)
+                # Update the total loss
+                total_loss += loss.item()
+
+                # Update the global step
+                global_step += 1
+
+                # Log the metrics
+                writer.add_scalar("detec_val/Loss", loss.item(), global_step)
         
-        writer.add_scalar("detection_valid/accuracy", np.mean(valid_accuracy), epoch)
-        avg_valid_accuracy = np.mean(valid_accuracy)
-        valid_accuracies.append(avg_valid_accuracy)
-
+        val_acc_metrics = val_accuracy_metric.compute()
+        v_acc,v_iou,v_depth,v_depth_lane = val_acc_metrics['accuracy'],val_acc_metrics['iou'],val_acc_metrics['abs_depth_error'],val_acc_metrics['tp_depth_error']
+        writer.add_scalar('detec_val/accruacy', val_acc_metrics["accuracy"], epoch)
+        writer.add_scalar("detec_val/iou", val_acc_metrics["iou"], epoch)
+        writer.add_scalar("detect_val/depth_error", val_acc_metrics["abs_depth_error"], epoch)
+        writer.add_scalar("detect_val/depth_error_lane", val_acc_metrics["tp_depth_error"], epoch)
+        
+        
+        # writer.add_scalar("valid/accuracy", np.mean(valid_accuracy), epoch)
         writer.flush()
 
-        ''''Update the live plot
-        if 1 ==2: 
-            line1.set_xdata(np.arange(1, epoch + 2))
-            line1.set_ydata(train_accuracies)
-            line2.set_xdata(np.arange(1, epoch + 2))
-            line2.set_ydata(valid_accuracies)
-            
-            ax.relim()
-            ax.autoscale_view()
-            plt.pause(0.1)  # Pause to update the plot'''
-        print(f"Epoch [{epoch + 1}/{epochs}] - Train Accuracy: {avg_train_accuracy:.4f}, Valid Accuracy: {avg_valid_accuracy:.4f}")
+    
+        print(f"Epoch [{epoch + 1}/{epochs}] - Train Accuracy: {t_acc:.4f}, Valid Accuracy: {v_acc:.4f}, Valid Iou: {v_iou:.4f}, Valid Depth Error: {v_depth:.4f}, Valid Depth Error Lane: {v_depth_lane:.4f}")
 
         ## Early stopping
         if epoch % 10 == 0:
@@ -141,6 +163,6 @@ def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_
                         'timestamps': timestamps}, f)
 
 if __name__ == "__main__":
-    train(models="detection",
+    train(models="detector",
     epochs=30,
     lr=1e-3)
