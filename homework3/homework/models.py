@@ -9,6 +9,7 @@ INPUT_STD = [0.2064, 0.1944, 0.2252]
 
 
 class Classifier(nn.Module):
+
     def __init__(
         self,
         in_channels: int = 3,
@@ -25,9 +26,49 @@ class Classifier(nn.Module):
 
         self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN))
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
-
+    
         # TODO: implement
-        pass
+ 
+        class Block(torch.nn.Module):
+            def __init__(self, in_channels, out_channels, stride):
+                super().__init__()
+                kernel_size = 3
+                padding = (kernel_size-1)//2
+
+                self.c1 = torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
+                self.n1 = torch.nn.GroupNorm(1, out_channels)
+                self.c2 = torch.nn.Conv2d(out_channels, out_channels, kernel_size, 1, padding)
+                self.n2 = torch.nn.GroupNorm(1, out_channels)
+                self.relu1 = torch.nn.ReLU()
+                self.relu2 = torch.nn.ReLU()
+
+                self.skip = torch.nn.Conv2d(in_channels, out_channels, 1, stride, 0) if in_channels != out_channels else torch.nn.Identity()
+                # self.pool = nn.MaxPool2d(2, 2)
+
+
+
+            def forward(self, x0):
+                x = self.relu1(self.n1(self.c1(x0)))
+                x = self.relu2(self.n2(self.c2(x)))
+                # x = self.pool(x)
+                return self.skip(x0) + x 
+         
+         # Define the CNN layers
+        
+        channels_l0 = 64
+        cnn_layers = [
+            torch.nn.Conv2d(in_channels, channels_l0, kernel_size=11, stride=2, padding=5),
+            torch.nn.ReLU(),
+        ]
+        c1 = channels_l0
+        n_blocks = 3
+        for _ in range(n_blocks):
+            c2 = c1 * 2
+            cnn_layers.append(Block(c1, c2, stride=2))
+            c1 = c2
+        cnn_layers.append(torch.nn.Conv2d(c1, num_classes, kernel_size=1))
+        self.network = torch.nn.Sequential(*cnn_layers)
+        
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -41,7 +82,12 @@ class Classifier(nn.Module):
         z = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
 
         # TODO: replace with actual forward pass
-        logits = torch.randn(x.size(0), 6)
+         # Forward through the network
+        z = self.network(z)
+
+        # Fully connected layer to produce logits (B, num_classes)
+        logits = z.mean(dim=-1).mean(dim=-1)
+
 
         return logits
 
@@ -79,6 +125,65 @@ class Detector(torch.nn.Module):
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
 
         # TODO: implement
+         # Feature extractor (shared layers)
+         # Define the convolutional layers for feature extraction
+        
+        class DownBlock(nn.Module):
+            def __init__(self, in_channels, out_channels):
+                super(DownBlock, self).__init__()
+                self.conv = nn.Sequential(
+                    nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+                    nn.ReLU(inplace=True),
+                    nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+                    nn.ReLU(inplace=True)
+                )
+                # Stride for downsampling
+                self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x, self.pool(x)  # Return both the convoluted output and the downsampled output
+
+        class UpBlock(nn.Module):
+            def __init__(self, in_channels, out_channels):
+                super(UpBlock, self).__init__()
+                self.upconv = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
+                self.conv = nn.Sequential(
+                    nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+                    nn.ReLU(inplace=True),
+                    nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+                    nn.ReLU(inplace=True)
+                )
+
+            def forward(self, x, skip):
+                x = self.upconv(x)
+
+                # Convert sizes to tuples for comparison
+                if (x.size(2), x.size(3)) != (skip.size(2), skip.size(3)):
+                    x = nn.functional.interpolate(x, size=(skip.size(2), skip.size(3)), mode='bilinear', align_corners=False)
+
+                x = torch.cat([x, skip], dim=1)  # Concatenate along the channel dimension
+                return self.conv(x)
+
+        # # Downsampling layers
+        # self.down1 = nn.Conv2d(in_channels, 16, kernel_size=3, stride=2, padding=1)  # Down1
+        # self.down2 = nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1)  # Down2
+        
+        # # Upsampling layers
+        # self.up1 = nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1)  # Up1
+        
+        
+         # Feature extractor (shared layers)
+        self.down1 = DownBlock(in_channels, 16)  # Output: (B, 16, 96, 128)
+        self.down2 = DownBlock(16, 32)            # Output: (B, 32, 48, 64)
+        self.down3 = DownBlock(32, 64)            # Output: (B, 64, 24, 32)
+
+        self.up1 = UpBlock(64, 32)                # Output: (B, 32, 48, 64)
+        self.up2 = UpBlock(32, 16)                # Output: (B, 16, 96, 128)
+
+        # Final layers
+        self.logits_layer = nn.Conv2d(16, num_classes, kernel_size=1)  # Output: (B, num_classes, 96, 128)
+        self.depth_layer = nn.Conv2d(16, 1, kernel_size=1)             # Output: (B, 96, 128)
         pass
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -100,6 +205,40 @@ class Detector(torch.nn.Module):
         # TODO: replace with actual forward pass
         logits = torch.randn(x.size(0), 3, x.size(2), x.size(3))
         raw_depth = torch.rand(x.size(0), x.size(2), x.size(3))
+
+        # Downsampling
+        # x = self.down1(x)  # (B, 16, 48, 64)
+        # x = nn.ReLU()(x)
+        
+        # x = self.down2(x)  # (B, 32, 24, 32)
+        # x = nn.ReLU()(x)
+        
+        # # Upsampling
+        # x_up = self.up1(x)  # (B, 16, 48, 64)
+        # x_up = nn.ReLU()(x_up)
+
+        # logits = self.up2(x_up)  # (B, num_classes, 96, 128)
+        
+        # # Depth output
+        # raw_depth = self.depth_layer(x_up)  # (B, 1, 96, 128)
+        # raw_depth = raw_depth.squeeze(1)
+
+        # Downsampling
+        
+        # Downsampling
+        
+        # Downsampling
+        skip1, down1_out = self.down1(z)  # (B, 16, 96, 128)
+        skip2, down2_out = self.down2(down1_out)  # (B, 32, 48, 64)
+        bottleneck, _ = self.down3(down2_out)  # (B, 64, 24, 32)
+
+        # Upsampling with skip connections
+        x_up1 = self.up1(bottleneck, skip2)  # (B, 32, 48, 64)
+        x_up2 = self.up2(x_up1, skip1)  # (B, 16, 96, 128)
+
+        logits = self.logits_layer(x_up2)  # (B, num_classes, 96, 128)
+        raw_depth = self.depth_layer(x_up2).squeeze(1)  # (B, 96, 128)
+
 
         return logits, raw_depth
 
@@ -146,7 +285,15 @@ def load_model(
         assert model_path.exists(), f"{model_path.name} not found"
 
         try:
-            m.load_state_dict(torch.load(model_path, map_location="cpu"))
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
+                device = "mps"
+            else:
+                print("CUDA not available, using CPU")
+                device = "cpu"
+            
+            m.load_state_dict(torch.load(model_path, map_location="device"))
         except RuntimeError as e:
             raise AssertionError(
                 f"Failed to load {model_path.name}, make sure the default model arguments are set correctly"
@@ -198,17 +345,72 @@ def debug_model(batch_size: int = 1):
     Feel free to add additional checks to this function -
     this function is NOT used for grading
     """
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    sample_batch = torch.rand(batch_size, 3, 64, 64).to(device)
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
+        device = torch.device("mps")
+    else:
+        print("CUDA not available, using CPU")
+        device = torch.device("cpu")
+    #sample_batch = torch.rand(batch_size, 3, 64, 64).to(device) #Classfication
+    '''Detector'''
+#     Your `forward` function receives a `(B, 3, 96, 128)` image tensor as an input and should return both:
+# - `(B, 3, 96, 128)` logits for the 3 classes
+# - `(B, 96, 128)` tensor of depths.
 
+    sample_batch = torch.rand(batch_size, 3, 96, 128).to(device) #Classfication
     print(f"Input shape: {sample_batch.shape}")
 
-    model = load_model("classifier", in_channels=3, num_classes=6).to(device)
-    output = model(sample_batch)
+    # model = load_model("classifier", in_channels=3, num_classes=6).to(device)
+    # output = model(sample_batch)
+    # print(f"Output shape: {output.shape}")
+    model = load_model("detector", in_channels=3, num_classes=3).to(device)
+    pred, depth = model(sample_batch)
+    print(f'pred shape: {pred.shape}')
+    print(f'depth shape: {depth.shape}')
+    
+    
+    
+
+    # def calculate_iou(prediction, target, num_classes):
+    #     """
+    #     Calculate the Intersection over Union (IoU) for each class.
+
+    #     Args:
+    #         prediction (torch.Tensor): Predicted segmentation mask (HxW) with class indices.
+    #         target (torch.Tensor): Ground truth segmentation mask (HxW) with class indices.
+    #         num_classes (int): Number of classes.
+
+    #     Returns:
+    #         iou (torch.Tensor): IoU for each class.
+    #     """
+    #     iou = torch.zeros(num_classes)
+    #     for cls in range(num_classes):
+    #         pred_mask = (prediction == cls).float()
+    #         target_mask = (target == cls).float()
+            
+    #         intersection = torch.sum(pred_mask * target_mask)
+    #         union = torch.sum(pred_mask) + torch.sum(target_mask) - intersection
+            
+    #         iou[cls] = intersection / (union + 1e-6)  # Avoid division by zero
+
+    #     return iou
+
+    # # Generate a dummy target tensor for testing
+    # target = sample_batch #torch.randint(0, 6, (batch_size, 64, 64)).to(device)
+
+    # # Convert output logits to class predictions
+    # predictions = output.argmax(dim=1).view(batch_size, 1, 1, -1).expand(-1, 1, 64, 64)  # Reshape for IoU calculation
+
+    # # Calculate IoU
+    # iou = calculate_iou(predictions.squeeze(1), target, num_classes=6)
+
+
 
     # should output logits (b, num_classes)
-    print(f"Output shape: {output.shape}")
+    
+    
 
 
 if __name__ == "__main__":
-    debug_model()
+    debug_model(10)
