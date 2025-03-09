@@ -41,8 +41,8 @@ def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_
 
     optim = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=weight_decay)
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8)
-    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size, num_workers=8)
+    train_loader = torch.utils.data.DataLoader('./drive_data/train', batch_size=batch_size, shuffle=True, num_workers=8)
+    valid_loader = torch.utils.data.DataLoader('./drive_data/val', batch_size=batch_size, num_workers=8)
 
     global_step = 0
     train_accuracies = []
