@@ -3,19 +3,18 @@ import torchvision
 from torch.utils.tensorboard import SummaryWriter
 # from fire import Fire
 # import classification_data.train
-from models import load_model, save_model
+from homework.models import load_model, save_model
 import numpy as np
-from datasets.road_dataset import load_data
-import matplotlib.pyplot as plt
-import time
-import pickle
-from metrics import DetectionMetric, AccuracyMetric
+from homework.road_dataset import load_data
+
+
+from homework.metrics import DetectionMetric, AccuracyMetric
 
 #tensorboard --logdir runs --bind_all --reuse_port True
 
 def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_decay = 1e-4,seg_loss_weight =0.5):
     ## Let's setup the dataloaders
-    timestamps = time.time()
+    
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
@@ -152,15 +151,7 @@ def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_
             torch.save(net.state_dict(), f"model_{epoch}.pth")
             
     
-    # models.
-        # plt.ioff()  # Turn off interactive mode
-        # plt.show()  # Show the final plot
-        save_model(net)
-        # Save accuracies and timestamps to a pickle file
-        with open(f'detection_accuracies{timestamps}.pkl', 'wb') as f:
-            pickle.dump({'train_accuracies': train_accuracies,
-                        'valid_accuracies': valid_accuracies,
-                        'timestamps': timestamps}, f)
+ 
 
 if __name__ == "__main__":
     train(models="detector",
