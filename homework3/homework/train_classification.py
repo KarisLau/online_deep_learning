@@ -87,7 +87,7 @@ def train(models = 'classifier',epochs = 10, batch_size = 256, lr = 0.005, weigh
                 valid_am.add(pred, label)
 
         valid_am_m = valid_am.compute()
-        writer.add_scalar('train/M_accruacy', valid_am_m['accuracy'], epoch)
+        writer.add_scalar('valid/M_accruacy', valid_am_m['accuracy'], epoch)
         valid_M = valid_am_m['accuracy']
         writer.add_scalar("valid/accuracy", np.mean(valid_accuracy), epoch)
         avg_valid_accuracy = np.mean(valid_accuracy)
