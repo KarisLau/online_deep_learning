@@ -6,12 +6,16 @@ from torch.utils.tensorboard import SummaryWriter
 from models import load_model, save_model
 import numpy as np
 from datasets.classification_dataset import load_data
+import matplotlib.pyplot as plt
+import time
+import pickle
 
 #tensorboard --logdir runs --bind_all --reuse_port True
 
 def train(models = 'classifier',epochs = 10, batch_size = 256, lr = 0.005, weight_decay = 1e-4):
     ## Let's setup the dataloaders
-    
+    timestamps = time.time()
+
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
@@ -29,56 +33,95 @@ def train(models = 'classifier',epochs = 10, batch_size = 256, lr = 0.005, weigh
     writer = SummaryWriter()
     writer.add_graph(model, torch.zeros(1, 3, *size))
     writer.add_images("train_images", torch.stack([train_dataset[i][0] for i in range(32)]))
-    writer.flush()
+    # writer.flush()
 
     net = model
+    net.to(device)
     
-    # optim = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=weight_decay)
+    optim = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=weight_decay)
 
-    # train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8)
-    # valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size, num_workers=8)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8)
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size, num_workers=8)
 
-    # global_step = 0
-    # for epoch in range(epochs):
+    global_step = 0
+    train_accuracies = []
+    valid_accuracies = []
 
-    #     net.train()
-    #     train_accuracy = []
-    #     for data, label in train_loader:
-    #         data, label = data.to(device), label.to(device)
-    #         output = net(data)
-    #         loss = torch.nn.functional.cross_entropy(output, label)
-    #         train_accuracy.extend((output.argmax(dim=-1) == label).cpu().detach().float().numpy())
+    plt.ion()  # Turn on interactive mode
+    fig, ax = plt.subplots()
+    ax.set_title('Training and Validation Accuracy')
+    ax.set_xlabel('Epochs')
+    ax.set_ylabel('Accuracy')
+    line1, = ax.plot([], [], label='Train Accuracy', color='blue')
+    line2, = ax.plot([], [], label='Valid Accuracy', color='orange')
+    ax.legend()
+    
+    for epoch in range(epochs):
 
-    #         optim.zero_grad()
-    #         loss.backward()
-    #         optim.step()
+        net.train()
+        train_accuracy = []
+        total_loss = 0.0
+        for data, label in train_loader:
+            data, label = data.to(device), label.to(device)
+            output = net(data)
+            loss = torch.nn.functional.cross_entropy(output, label)
+            train_accuracy.extend((output.argmax(dim=-1) == label).cpu().detach().float().numpy())
+            total_loss += loss.item()
 
-    #         writer.add_scalar("train/loss", loss.item(), global_step=global_step)
-    #         global_step += 1
+            optim.zero_grad()
+            loss.backward()
+            optim.step()
 
-    #     writer.add_scalar("train/accuracy", np.mean(train_accuracy), epoch)
+            writer.add_scalar("train/loss", loss.item(), global_step=global_step)
+            global_step += 1
 
-    #     net.eval()
-    #     valid_accuracy = []
-    #     with torch.inference_mode(): 
-    #         for data, label in valid_loader:
-    #             data, label = data.to(device), label.to(device)
-    #             with torch.inference_mode():
-    #                 logits, depth_preds = net(data)
+        writer.add_scalar("train/accuracy", np.mean(train_accuracy), epoch)
+        avg_train_loss = total_loss / len(train_loader)
+        avg_train_accuracy = np.mean(train_accuracy)
+        train_accuracies.append(avg_train_accuracy)
 
-    #             valid_accuracy.extend((logits.argmax(dim=1) == label).cpu().detach().float().numpy())
+        net.eval()
+        valid_accuracy = []
+        with torch.inference_mode(): 
+            for data, label in valid_loader:
+                data, label = data.to(device), label.to(device)
+                with torch.inference_mode():
+                    logits = net(data)
+
+                valid_accuracy.extend((logits.argmax(dim=-1) == label).cpu().detach().float().numpy())
 
         
-    #     writer.add_scalar("valid/accuracy", np.mean(valid_accuracy), epoch)
+        writer.add_scalar("valid/accuracy", np.mean(valid_accuracy), epoch)
+        avg_valid_accuracy = np.mean(valid_accuracy)
+        valid_accuracies.append(avg_valid_accuracy)
 
-    #     writer.flush()
+        writer.flush()
 
-    #     ## Early stopping
-    #     if epoch % 10 == 0:
-    #         torch.save(net.state_dict(), f"model_{epoch}.pth")
+        # Update the live plot
+        line1.set_xdata(np.arange(1, epoch + 2))
+        line1.set_ydata(train_accuracies)
+        line2.set_xdata(np.arange(1, epoch + 2))
+        line2.set_ydata(valid_accuracies)
+        
+        ax.relim()
+        ax.autoscale_view()
+        plt.pause(0.1)  # Pause to update the plot
+        print(f"Epoch [{epoch + 1}/{epochs}] - Train Accuracy: {avg_train_accuracy:.4f}, Valid Accuracy: {avg_valid_accuracy:.4f}")
+
+        ## Early stopping
+        if epoch % 10 == 0:
+            torch.save(net.state_dict(), f"model_{epoch}.pth")
+            
     
-    # # models.
-    #     save_model(net)
+    # models.
+        plt.ioff()  # Turn off interactive mode
+        plt.show()  # Show the final plot
+        save_model(net)
+        # Save accuracies and timestamps to a pickle file
+        with open(f'accuracies{timestamps}.pkl', 'wb') as f:
+            pickle.dump({'train_accuracies': train_accuracies,
+                        'valid_accuracies': valid_accuracies,
+                        'timestamps': timestamps}, f)
 
 if __name__ == "__main__":
     train()
