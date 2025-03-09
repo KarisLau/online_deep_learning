@@ -3,9 +3,9 @@ import torchvision
 from torch.utils.tensorboard import SummaryWriter
 # from fire import Fire
 # import classification_data.train
-from models import load_model, save_model
+from homework.models import load_model, save_model
 import numpy as np
-from datasets.classification_dataset import load_data
+from homework.datasets.classification_dataset import load_data
 import matplotlib.pyplot as plt
 import time
 import pickle
@@ -30,7 +30,7 @@ def train(models = 'classifier',epochs = 10, batch_size = 256, lr = 0.005, weigh
     
     size = (64,64)
     model = load_model(models,with_weights=False) #.to(device)
-    writer = SummaryWriter()
+    writer = SummaryWriter('logs')
     writer.add_graph(model, torch.zeros(1, 3, *size))
     writer.add_images("train_images", torch.stack([train_dataset[i][0] for i in range(32)]))
     # writer.flush()
