@@ -1,10 +1,10 @@
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
-from models import load_model, save_model
+from homework.models import load_model, save_model
 import numpy as np
-from datasets.road_dataset import load_data
-from metrics import DetectionMetric,AccuracyMetric
+from homework.datasets.road_dataset import load_data
+from homework.metrics import DetectionMetric,AccuracyMetric
 from torchvision import transforms
 
 
@@ -22,7 +22,7 @@ def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_
         print("CUDA not available, using CPU")
         device = torch.device("cpu")
 
-    train_dataset = load_data('./drive_data/train', transform_pipeline='default', return_dataloader=False,shuffle=True)
+     train_dataset = load_data('./drive_data/train', transform_pipeline='default', return_dataloader=False,shuffle=True)
     valid_dataset = load_data('./drive_data/val', transform_pipeline='default', return_dataloader=False,shuffle=False)
 
     size = (96, 128)
@@ -101,21 +101,11 @@ def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_
                 depths = batch["depth"].to(device)
                 tracks = batch["track"].to(device)
                 
-                logits,raw_depth = net(images,depths)
+                logits,raw_depth = net(images)
                 preds = torch.argmax(logits, dim=1)
                 # Compute the metrics
                 val_accuracy_metric.add(preds, tracks, raw_depth, depths)
-                
-                depth_error = (raw_depth - depths).abs()
-                tp_mask = ((preds == tracks) & (tracks > 0)).float()
-                tp_depth_error = depth_error * tp_mask
-                tp_depth_error_sum += tp_depth_error.sum().item()
-                tp_depth_error_n += tp_mask.sum().item()
-
-            
-            # Compute validation metrics
-            print(f'{tp_depth_error_sum =}')
-            print(f'{tp_depth_error_n =}')
+     
             val_results = val_accuracy_metric.compute()
             v_acc,v_iou,v_depth,v_depth_lane = val_results['accuracy'],val_results['iou'],val_results['abs_depth_error'],val_results['tp_depth_error']
 
@@ -136,9 +126,16 @@ def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_
         
         if init_acc < v_acc:
             save_model(net)
+            init_acc = valid_M
+            print(f'{epoch} model is saved. Val Acc = {valid_M}')
+
+        ## Early stopping
+        # if epoch % 10 == 0:
+        #     torch.save(net.state_dict(), f"model_{epoch}.pth")
+            
+        
+        if init_acc < v_acc:
+            save_model(net)
         
 if __name__ == "__main__":
-    train(models="detector",
-    epochs=3,
-    lr=1e-3,
-    batch_size= 256)
+    train()
