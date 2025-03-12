@@ -8,7 +8,7 @@ from homework.metrics import DetectionMetric
 from torchvision import transforms
 # homework/datasets/road_dataset.py
 
-def train(models = 'detector',epochs = 4, batch_size = 256, lr = 1e-3, weight_decay = 1e-4,seg_weight = 1000):
+def train(models = 'detector',epochs = 210, batch_size = 256, lr = 1e-3/2, weight_decay = 1e-4,seg_weight = 15):
     init_acc = 0 
     ## Let's setup the dataloaders
     if torch.cuda.is_available():
@@ -59,8 +59,8 @@ def train(models = 'detector',epochs = 4, batch_size = 256, lr = 1e-3, weight_de
             images = batch['image'].to(device)
             depths = batch['depth'].to(device)
             tracks = batch['track'].to(device)    
-            if global_step == 0:
-                print(f'train images: {images.shape}, depths: {depths.shape}, tracks: {tracks.shape}')
+            # if global_step == 0:
+            #     print(f'train images: {images.shape}, depths: {depths.shape}, tracks: {tracks.shape}')
             optim.zero_grad()
             
             # Forward pass
@@ -74,8 +74,8 @@ def train(models = 'detector',epochs = 4, batch_size = 256, lr = 1e-3, weight_de
             optim.step()
             total_loss += loss.item()
             preds = logits.argmax(dim=1)
-            if global_step == 0:
-                print(f'Train preds: {preds.shape}, tracks: {tracks.shape}, depth_pred: {depth_pred.shape}, depths: {depths.shape}')
+            # if global_step == 0:
+            #     print(f'Train preds: {preds.shape}, tracks: {tracks.shape}, depth_pred: {depth_pred.shape}, depths: {depths.shape}')
             train_dm.add(preds, tracks, depth_pred, depths)
             writer.add_scalar("train/loss", loss.item(), global_step=global_step)
             global_step += 1
@@ -94,12 +94,12 @@ def train(models = 'detector',epochs = 4, batch_size = 256, lr = 1e-3, weight_de
                 tracks = batch['track'].to(device)    
             # for images, depths, tracks in valid_loader:
             #     images, depths, tracks = images.to(device), depths.to(device), tracks.to(device)
-                if global_step == 0:
-                    print(f'Val images: {images.shape}, depths: {depths.shape}, tracks: {tracks.shape}')
+                # if global_step == 0:
+                #     print(f'Val images: {images.shape}, depths: {depths.shape}, tracks: {tracks.shape}')
                 logits, depth_pred = net(images)
                 preds = logits.argmax(dim=1)
-                if global_step == 0:
-                    print(f'Val preds: {preds.shape}, tracks: {tracks.shape}, depth_pred: {depth_pred.shape}, depths: {depths.shape}')
+                # if global_step == 0:
+                #     print(f'Val preds: {preds.shape}, tracks: {tracks.shape}, depth_pred: {depth_pred.shape}, depths: {depths.shape}')
                 val_dm.add(preds, tracks, depth_pred, depths)
         val_dm_m = val_dm.compute()
         writer.add_scalar('val/M_accruacy', val_dm_m['accuracy'], epoch)
@@ -107,10 +107,11 @@ def train(models = 'detector',epochs = 4, batch_size = 256, lr = 1e-3, weight_de
         writer.add_scalar('val/depth_er', val_dm_m['abs_depth_error'], epoch)
         writer.add_scalar('val/TruePositive', val_dm_m['tp_depth_error'], epoch)
         writer.flush()
-        print(f"Epoch {epoch+1}/{epochs}, Train Acc: {train_dm_m['accuracy']:.4f},  Val Acc: {val_dm_m['accuracy']:.4f}, Val IoU: {val_dm_m['iou']:.4f}, Val TP: {val_dm_m['abs_depth_error']:.4f}, Val TP Depth Error: {val_dm_m['tp_depth_error']:.4f}")
+        # print(f"Epoch {epoch+1}/{epochs}, T Acc: {train_dm_m['accuracy']:.4f},  V Acc: {val_dm_m['accuracy']:.4f}, V IoU: {val_dm_m['iou']:.4f}, V abs depth: {val_dm_m['abs_depth_error']:.4f}, V TP : {val_dm_m['tp_depth_error']:.4f}")
         if val_dm_m['iou'] > init_acc:
             save_model(net)
             init_acc = val_dm_m['iou']
+            print(f"Epoch {epoch+1} is saved, T Acc: {train_dm_m['accuracy']:.4f},  V Acc: {val_dm_m['accuracy']:.4f}, V IoU: {val_dm_m['iou']:.4f}, V abs depth: {val_dm_m['abs_depth_error']:.4f}, V TP : {val_dm_m['tp_depth_error']:.4f}")
     
         
 
