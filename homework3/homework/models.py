@@ -9,7 +9,6 @@ INPUT_STD = [0.2064, 0.1944, 0.2252]
 
 
 class Classifier(nn.Module):
-
     def __init__(
         self,
         in_channels: int = 3,
@@ -26,9 +25,7 @@ class Classifier(nn.Module):
 
         self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN))
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
-    
-        # TODO: implement
- 
+
         class Block(torch.nn.Module):
             def __init__(self, in_channels, out_channels, stride):
                 super().__init__()
@@ -81,13 +78,13 @@ class Classifier(nn.Module):
         # optional: normalizes the input
         z = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
 
+        
         # TODO: replace with actual forward pass
-         # Forward through the network
+        # logits = torch.randn(x.size(0), 6)
         z = self.network(z)
 
         # Fully connected layer to produce logits (B, num_classes)
         logits = z.mean(dim=-1).mean(dim=-1)
-
 
         return logits
 
@@ -125,27 +122,143 @@ class Detector(torch.nn.Module):
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
 
         # TODO: implement
-         # Feature extractor (shared layers)
-         # Define the convolutional layers for feature extraction
+        class Down_Block(torch.nn.Module):
+            def __init__(self, in_channels, out_channels, stride):
+                super().__init__()
+                kernel_size = 3
+                padding = (kernel_size-1)//2
 
-         # Downsampling layers
-        self.down_conv1 = nn.Conv2d(in_channels, 16, kernel_size=3, stride=2, padding=1)  # (B, 16, H/2, W/2)
-        self.down_conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1)           # (B, 32, H/4, W/4)
-        self.down_conv3 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)           # (B, 64, H/8, W/8)
-        self.down_conv4 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1)          # (B, 128, H/16, W/16)
+                self.c1 = torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
+                self.n1 = torch.nn.GroupNorm(1, out_channels)
+                self.c2 = torch.nn.Conv2d(out_channels, out_channels, kernel_size, 1, padding)
+                self.n2 = torch.nn.GroupNorm(1, out_channels)
+                self.relu1 = torch.nn.ReLU()
+                self.relu2 = torch.nn.ReLU()
 
-        # Up-sampling layers
-        self.up_conv1 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)               # (B, 64, H/8, W/8)
-        self.up_conv2 = nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2)                # (B, 32, H/4, W/4)
-        self.up_conv3 = nn.ConvTranspose2d(32, 16, kernel_size=2, stride=2)                # (B, 16, H/2, W/2)
-        self.up_conv4 = nn.ConvTranspose2d(16, 16, kernel_size=2, stride=2)                # (B, 16, H, W)
+                self.skip = torch.nn.Conv2d(in_channels, out_channels, 1, stride, 0) if in_channels != out_channels else torch.nn.Identity()
+                
+            def forward(self, x0):
+                x = self.relu1(self.n1(self.c1(x0)))
+                x = self.relu2(self.n2(self.c2(x)))
+                # x = self.pool(x)
+                return self.skip(x0) + x 
+         
+        class Up_Block(torch.nn.Module):
+            def __init__(self, in_channels, out_channels, stride):
+                super().__init__()
+                kernel_size = 3
+                padding = (kernel_size-1)//2
 
-        # Final layers for logits and depth
-        self.logits_conv = nn.Conv2d(16, num_classes, kernel_size=1)                       # (B, num_classes, H, W)
-        self.depth_conv = nn.Conv2d(16, 1, kernel_size=1)                                  # (B, 1, H, W)
+                self.c1 = torch.nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride=2, padding=1, output_padding=1)
+                self.n1 = torch.nn.GroupNorm(1, out_channels)
+                self.c2 = torch.nn.Conv2d(out_channels, out_channels, kernel_size, 1, padding)
+                self.n2 = torch.nn.GroupNorm(1, out_channels)
+                self.relu1 = torch.nn.ReLU()
+                self.relu2 = torch.nn.ReLU()
+                
+                self.skip = torch.nn.ConvTranspose2d(in_channels, out_channels, 1, stride, 0, output_padding=1) if in_channels != out_channels else torch.nn.Identity()
+                
+            def forward(self, x0):
+                x = self.relu1(self.n1(self.c1(x0)))
+                x = self.relu2(self.n2(self.c2(x)))
+                # x = self.pool(x)
+                return self.skip(x0) + x 
+         
+        
+        channels_l0 = 16
+        cnn_layers = [
+            torch.nn.Conv2d(in_channels, channels_l0, kernel_size=11, stride=2, padding=5),
+            torch.nn.ReLU(),
+        ]
+        c1 = channels_l0
+        n_blocks = 4
+        for _ in range(n_blocks):
+            c2 = c1 * 2
+            cnn_layers.append(Down_Block(c1, c2, stride=2))
+            c1 = c2
+        
+        for _ in range(n_blocks+1):
+            c2 = c1 // 2    
+            cnn_layers.append(Up_Block(c1, c2, stride=2))
+            c1 = c2
 
-        # Activation
-        self.relu = nn.ReLU()
+        cnn_layers.append(torch.nn.Conv2d(c1, num_classes, kernel_size=1))
+        self.network = torch.nn.Sequential(*cnn_layers)
+
+        self.depth_layer = torch.nn.ConvTranspose2d(num_classes, 1, kernel_size=3, stride=1, padding=1)
+
+        # self.approach = 1
+        
+        if 1 ==2: #OK approach
+        # Downsampling layers
+            self.down_conv1 = nn.Conv2d(in_channels, 16, kernel_size=3, stride=2, padding=1)  # (B, 16, H/2, W/2)
+            self.down_conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1)           # (B, 32, H/4, W/4)
+            self.down_conv3 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)           # (B, 64, H/8, W/8)
+            self.down_conv4 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1)          # (B, 128, H/16, W/16)
+
+            # Up-sampling layers
+            self.up_conv1 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)               # (B, 64, H/8, W/8)
+            self.up_conv2 = nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2)                # (B, 32, H/4, W/4)
+            self.up_conv3 = nn.ConvTranspose2d(32, 16, kernel_size=2, stride=2)                # (B, 16, H/2, W/2)
+            self.up_conv4 = nn.ConvTranspose2d(16, 16, kernel_size=2, stride=2)                # (B, 16, H, W)
+
+            # Final layers for logits and depth
+            self.logits_conv = nn.Conv2d(16, num_classes, kernel_size=1)                       # (B, num_classes, H, W)
+            self.depth_conv = nn.Conv2d(16, 1, kernel_size=1)                                  # (B, 1, H, W)
+
+            # Activation
+            self.relu = nn.ReLU()
+        
+        if 1 ==2: # not ok approach
+            # Down-sampling layers
+            self.down1 = nn.Sequential(
+                nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(16, 16, kernel_size=3, stride=1, padding=1),
+                nn.ReLU()
+            )
+            
+            self.down2 = nn.Sequential(
+                nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
+                nn.ReLU()
+            )
+            
+            self.down3 = nn.Sequential(
+                nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+                nn.ReLU()
+            )
+            
+            # Up-sampling layers
+            self.up1 = nn.Sequential(
+                nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),
+                nn.ReLU(),
+                nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
+                nn.ReLU()
+            )
+            
+            self.up2 = nn.Sequential(
+                nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=1, output_padding=1),
+                nn.ReLU(),
+                nn.Conv2d(16, 16, kernel_size=3, stride=1, padding=1),
+                nn.ReLU()
+            )
+            
+            self.up3 = nn.Sequential(
+                nn.ConvTranspose2d(16, num_classes, kernel_size=3, stride=2, padding=1, output_padding=1),
+                nn.ReLU(),
+                nn.Conv2d(num_classes, num_classes, kernel_size=3, stride=1, padding=1),
+                nn.ReLU()
+            )
+            
+            # Depth output layer
+            # Depth output layer to match input size
+            self.depth_layer = nn.ConvTranspose2d(64, 1, kernel_size=3, stride=2, padding=1, output_padding=1)
+
+
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -164,27 +277,50 @@ class Detector(torch.nn.Module):
         z = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
 
         # TODO: replace with actual forward pass
+        z = self.network(z)
+        logits = z
+        raw_depth = self.depth_layer(z).squeeze(1)
         
-        # Down-sampling path
-        z1 = self.relu(self.down_conv1(z))  # Down1
-        z2 = self.relu(self.down_conv2(z1)) # Down2
-        z3 = self.relu(self.down_conv3(z2)) # Down3
-        z4 = self.relu(self.down_conv4(z3)) # Down4
+        
+        if 1 == 2: #ok approach
+            # Down-sampling path
+            z1 = self.relu(self.down_conv1(z))  # Down1
+            z2 = self.relu(self.down_conv2(z1)) # Down2
+            z3 = self.relu(self.down_conv3(z2)) # Down3
+            z4 = self.relu(self.down_conv4(z3)) # Down4
 
-        # Up-sampling path
-        z5 = self.up_conv1(z4)  # Up1
-        z6 = self.relu(z5 + z3)  # Skip connection with Down3
-        z7 = self.up_conv2(z6)  # Up2
-        z8 = self.relu(z7 + z2)  # Skip connection with Down2
-        z9 = self.up_conv3(z8)  # Up3
-        z10 = self.relu(z9 + z1)  # Skip connection with Down1
-        z11 = self.up_conv4(z10)  # Up4
+            # Up-sampling path
+            z5 = self.up_conv1(z4)  # Up1
+            z6 = self.relu(z5 + z3)  # Skip connection with Down3
+            z7 = self.up_conv2(z6)  # Up2
+            z8 = self.relu(z7 + z2)  # Skip connection with Down2
+            z9 = self.up_conv3(z8)  # Up3
+            z10 = self.relu(z9 + z1)  # Skip connection with Down1
+            z11 = self.up_conv4(z10)  # Up4
 
-        # Logits and Depth output
-        logits = self.logits_conv(z11)  # (B, num_classes, H, W)
-        depth = self.depth_conv(z11)     # (B, 1, H, W)
+            # Logits and Depth output
+            logits = self.logits_conv(z11)  # (B, num_classes, H, W)
+            depth = self.depth_conv(z11)     # (B, 1, H, W)
 
-        raw_depth = depth.squeeze(1)  # (B, H, W)
+            raw_depth = depth.squeeze(1)  # (B, H, W)
+        
+        if 1 == 2: # not ok approach
+            # Down-sampling
+            down1_out = self.down1(z)  # shape: (B, 16, h/2, w/2)
+            down2_out = self.down2(down1_out)  # shape: (B, 32, h/4, w/4)
+            down3_out = self.down3(down2_out)  # shape: (B, 64, h/8, w/8)
+            
+            # Depth output
+            raw_depth = self.depth_layer(down3_out)  # shape: (B, 1, h/8, w/8)
+            raw_depth = raw_depth.squeeze(1)  # (B, H, W)
+
+            # Up-sampling with residual connections
+            x = self.up1(down3_out)  # Up-sample from down3
+            x += down2_out  # Residual connection from down2
+            x = self.up2(x)  # Up-sample to (B, 16, h/2, w/2)
+            x += down1_out  # Residual connection from down1
+            logits = self.up3(x)  # Final up-sample to (B, num_classes, h, w)
+
         
         return logits, raw_depth
 
@@ -231,15 +367,7 @@ def load_model(
         assert model_path.exists(), f"{model_path.name} not found"
 
         try:
-            if torch.cuda.is_available():
-                device = "cuda"
-            elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
-                device = "mps"
-            else:
-                print("CUDA not available, using CPU")
-                device = "cpu"
-            
-            m.load_state_dict(torch.load(model_path, map_location="device"))
+            m.load_state_dict(torch.load(model_path, map_location="cpu"))
         except RuntimeError as e:
             raise AssertionError(
                 f"Failed to load {model_path.name}, make sure the default model arguments are set correctly"
@@ -291,6 +419,17 @@ def debug_model(batch_size: int = 1):
     Feel free to add additional checks to this function -
     this function is NOT used for grading
     """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    sample_batch = torch.rand(batch_size, 3, 64, 64).to(device)
+
+    print(f"Input shape: {sample_batch.shape}")
+
+    model = load_model("classifier", in_channels=3, num_classes=6).to(device)
+    output = model(sample_batch)
+
+    # should output logits (b, num_classes)
+    print(f"Output shape: {output.shape}")
+
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
@@ -316,10 +455,7 @@ def debug_model(batch_size: int = 1):
     print(f'logit shape: {logit.shape}')
     print(f'depth shape: {depth.shape}')
     print(f'pred shape: {pred.shape}')
-    
-    
-    
 
 
 if __name__ == "__main__":
-    debug_model(10)
+    debug_model()
