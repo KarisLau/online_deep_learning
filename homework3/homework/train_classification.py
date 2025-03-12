@@ -8,7 +8,7 @@ from homework.metrics import AccuracyMetric
 
 #tensorboard --logdir runs --bind_all --reuse_port True
 
-def train(models = 'classifier',epochs = 20, batch_size = 256, lr = 1e-3, weight_decay = 1e-4):
+def train(models = 'classifier',epochs = 30, batch_size = 256, lr = 1e-3/2, weight_decay = 1e-4):
     init_acc = 0 
     ## Let's setup the dataloaders
     if torch.cuda.is_available():
