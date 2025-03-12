@@ -96,7 +96,7 @@ def train(models = 'classifier',epochs = 20, batch_size = 256, lr = 1e-3, weight
 
         writer.flush()
 
-        print(f"Epoch [{epoch + 1}/{epochs}] - Train Accuracy: {train_M:.4f}, Valid Accuracy: {valid_M:.4f}")
+        # print(f"Epoch [{epoch + 1}/{epochs}] - Train Accuracy: {train_M:.4f}, Valid Accuracy: {valid_M:.4f}")
 
         ## Early stopping
         # if epoch % 10 == 0:
@@ -104,11 +104,9 @@ def train(models = 'classifier',epochs = 20, batch_size = 256, lr = 1e-3, weight
     
         if init_acc < valid_M: #save model if val accuracy is highest
             save_model(net)
+            init_acc = valid_M
+            print(f'{epoch} model is saved. Val Acc = {valid_M}')
         
     
 if __name__ == "__main__":
-    train(
-    models="classifier",
-    epochs=20,
-    lr=1e-3,
-)
+    train()
