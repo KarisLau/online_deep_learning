@@ -22,7 +22,7 @@ def train(models = 'detector',epochs = 10, batch_size = 256, lr = 0.005, weight_
         print("CUDA not available, using CPU")
         device = torch.device("cpu")
 
-     train_dataset = load_data('./drive_data/train', transform_pipeline='default', return_dataloader=False,shuffle=True)
+    train_dataset = load_data('./drive_data/train', transform_pipeline='default', return_dataloader=False,shuffle=True)
     valid_dataset = load_data('./drive_data/val', transform_pipeline='default', return_dataloader=False,shuffle=False)
 
     size = (96, 128)
