@@ -83,7 +83,7 @@ def train(models = 'detector',epochs = 4, batch_size = 256, lr = 1e-3, weight_de
         train_dm_m = train_dm.compute()
         writer.add_scalar('train/M_accruacy', train_dm_m['accuracy'], epoch)
         writer.add_scalar('train/M_iou', train_dm_m['iou'], epoch)
-        print(f"Epoch {epoch+1}/{epochs}, Train Acc: {train_dm_m['accuracy']:.4f}, Train IoU: {train_dm_m['iou']:.4f}")
+        # print(f"Epoch {epoch+1}/{epochs}, Train Acc: {train_dm_m['accuracy']:.4f}, Train IoU: {train_dm_m['iou']:.4f}")
         writer.flush()
 
         net.eval()
@@ -107,10 +107,10 @@ def train(models = 'detector',epochs = 4, batch_size = 256, lr = 1e-3, weight_de
         writer.add_scalar('val/depth_er', val_dm_m['abs_depth_error'], epoch)
         writer.add_scalar('val/TruePositive', val_dm_m['tp_depth_error'], epoch)
         writer.flush()
-        print(f"Epoch {epoch+1}/{epochs}, Train Acc: {train_dm_m['accuracy']:.4f},  Val Acc: {val_dm_m['accuracy']:.4f}, Val IoU: {val_dm_m['iou']:.4f}, Val Depth Error: {val_dm_m['abs_depth_error']:.4f}, Val TP Depth Error: {val_dm_m['tp_depth_error']:.4f}")
-        if val_dm_m['accuracy'] > init_acc:
+        print(f"Epoch {epoch+1}/{epochs}, Train Acc: {train_dm_m['accuracy']:.4f},  Val Acc: {val_dm_m['accuracy']:.4f}, Val IoU: {val_dm_m['iou']:.4f}, Val TP: {val_dm_m['abs_depth_error']:.4f}, Val TP Depth Error: {val_dm_m['tp_depth_error']:.4f}")
+        if val_dm_m['iou'] > init_acc:
             save_model(net)
-            init_acc = val_dm_m['accuracy']
+            init_acc = val_dm_m['iou']
     
         
 
