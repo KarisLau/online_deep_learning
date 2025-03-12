@@ -1,10 +1,10 @@
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
-from models import load_model, save_model
+from homework.models import load_model, save_model
 import numpy as np
-from datasets.classification_dataset import load_data
-from metrics import AccuracyMetric
+from homework.datasets.classification_dataset import load_data
+from homework.metrics import AccuracyMetric
 
 #tensorboard --logdir runs --bind_all --reuse_port True
 
