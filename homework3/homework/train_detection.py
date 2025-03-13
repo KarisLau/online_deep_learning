@@ -117,6 +117,7 @@ def train(models = 'detector',epochs = 210, batch_size = 256, lr = 1e-3/2, weigh
         else:
           val_dm_tp =val_dm_m['tp_depth_error']
 
+
         if val_dm_m['iou'] > init_acc and val_dm_tp<init_tp:
             save_model(net)
             init_acc = val_dm_m['iou']
