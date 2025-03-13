@@ -8,7 +8,7 @@ from homework.metrics import DetectionMetric
 from torchvision import transforms
 # homework/datasets/road_dataset.py
 
-def train(models = 'detector',epochs = 210, batch_size = 256, lr = 1e-3/2, weight_decay = 1e-4,seg_weight = 15):
+def train(models = 'detector',epochs = 210, batch_size = 256, lr = 1e-3/2, weight_decay = 1e-4,seg_weight = 1.5):
     init_acc = 0 
     ## Let's setup the dataloaders
     if torch.cuda.is_available():
@@ -67,6 +67,9 @@ def train(models = 'detector',epochs = 210, batch_size = 256, lr = 1e-3/2, weigh
             logits, depth_pred = model(images)
             seg_loss = torch.nn.functional.cross_entropy(logits, tracks)
             depth_loss = torch.nn.functional.mse_loss(depth_pred, depths)
+            if depth_loss ==0:
+              depth_loss = 999
+            
             loss = seg_loss*seg_weight + depth_loss
             
             
@@ -108,7 +111,12 @@ def train(models = 'detector',epochs = 210, batch_size = 256, lr = 1e-3/2, weigh
         writer.add_scalar('val/TruePositive', val_dm_m['tp_depth_error'], epoch)
         writer.flush()
         # print(f"Epoch {epoch+1}/{epochs}, T Acc: {train_dm_m['accuracy']:.4f},  V Acc: {val_dm_m['accuracy']:.4f}, V IoU: {val_dm_m['iou']:.4f}, V abs depth: {val_dm_m['abs_depth_error']:.4f}, V TP : {val_dm_m['tp_depth_error']:.4f}")
-        if val_dm_m['iou'] > init_acc:
+        if val_dm_m['iou'] <0.7 or val_dm_m['tp_depth_error']<1e-5 :
+          val_dm_tp = 999
+        else:
+          val_dm_tp =val_dm_m['tp_depth_error']
+
+        if val_dm_m['iou'] > init_acc and val_dm_tp<init_tp:
             save_model(net)
             init_acc = val_dm_m['iou']
             print(f"Epoch {epoch+1} is saved, T Acc: {train_dm_m['accuracy']:.4f},  V Acc: {val_dm_m['accuracy']:.4f}, V IoU: {val_dm_m['iou']:.4f}, V abs depth: {val_dm_m['abs_depth_error']:.4f}, V TP : {val_dm_m['tp_depth_error']:.4f}")
