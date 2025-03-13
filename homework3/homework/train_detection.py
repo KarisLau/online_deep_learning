@@ -111,7 +111,7 @@ def train(models = 'detector',epochs = 210, batch_size = 256, lr = 1e-3/2, weigh
         writer.add_scalar('val/depth_er', val_dm_m['abs_depth_error'], epoch)
         writer.add_scalar('val/TruePositive', val_dm_m['tp_depth_error'], epoch)
         writer.flush()
-        # print(f"Epoch {epoch+1}/{epochs}, T Acc: {train_dm_m['accuracy']:.4f},  V Acc: {val_dm_m['accuracy']:.4f}, V IoU: {val_dm_m['iou']:.4f}, V abs depth: {val_dm_m['abs_depth_error']:.4f}, V TP : {val_dm_m['tp_depth_error']:.4f}")
+        print(f"Epoch {epoch+1}/{epochs}, T Acc: {train_dm_m['accuracy']:.4f},  V Acc: {val_dm_m['accuracy']:.4f}, V IoU: {val_dm_m['iou']:.4f}, V abs depth: {val_dm_m['abs_depth_error']:.4f}, V TP : {val_dm_m['tp_depth_error']:.4f}")
         if val_dm_m['iou'] <0.7 or val_dm_m['tp_depth_error']<1e-5 :
           val_dm_tp = 999
         else:
