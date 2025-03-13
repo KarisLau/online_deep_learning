@@ -71,6 +71,15 @@ def train(models = 'detector',epochs = 210, batch_size = 256, lr = 1e-3/2, weigh
             if depth_loss ==0:
               depth_loss = 999
             
+            if init_acc >0.78 and init_tp >0.05:
+              seg_weight = 0.8
+            elif init_acc >0.78 and init_tp <0.047:
+              seg_weight = 1
+            else:
+              seg_weight = 1.5
+            
+
+
             loss = seg_loss*seg_weight + depth_loss
             
             
@@ -118,7 +127,7 @@ def train(models = 'detector',epochs = 210, batch_size = 256, lr = 1e-3/2, weigh
           val_dm_tp =val_dm_m['tp_depth_error']
 
 
-        if val_dm_m['iou'] > init_acc and val_dm_tp<init_tp:
+        if val_dm_m['iou'] > init_acc or (val_dm_m['iou'] > 0.7 and val_dm_tp<init_tp):
             save_model(net)
             init_acc = val_dm_m['iou']
             print(f"Epoch {epoch+1} is saved, T Acc: {train_dm_m['accuracy']:.4f},  V Acc: {val_dm_m['accuracy']:.4f}, V IoU: {val_dm_m['iou']:.4f}, V abs depth: {val_dm_m['abs_depth_error']:.4f}, V TP : {val_dm_m['tp_depth_error']:.4f}")
