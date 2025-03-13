@@ -10,6 +10,7 @@ from torchvision import transforms
 
 def train(models = 'detector',epochs = 210, batch_size = 256, lr = 1e-3/2, weight_decay = 1e-4,seg_weight = 1.5):
     init_acc = 0 
+    init_tp = 999
     ## Let's setup the dataloaders
     if torch.cuda.is_available():
         device = torch.device("cuda")
