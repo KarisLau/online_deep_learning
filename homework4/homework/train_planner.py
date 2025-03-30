@@ -8,10 +8,10 @@ print("Time to train")
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
-from models import load_model, save_model
+from homework.models import load_model, save_model
 import numpy as np
-from datasets.road_dataset import load_data
-from metrics import PlannerMetric
+from homework.datasets.road_dataset import load_data
+from homework.metrics import PlannerMetric
 from torchvision import transforms
 # homework/datasets/road_dataset.py
 
