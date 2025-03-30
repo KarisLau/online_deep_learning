@@ -15,7 +15,7 @@ from homework.metrics import PlannerMetric
 from torchvision import transforms
 # homework/datasets/road_dataset.py
 
-def train(models = 'linear_planner',epochs = 250, batch_size = 256, lr = 1e-3/2, weight_decay = 1e-4):
+def train(models = 'linear_planner',epochs = 250, batch_size = 256, lr = 1e-3/2, weight_decay = 1e-4,transform_pipeline = 'default'):
     init_lat = 999
     init_long = 999
     
@@ -29,14 +29,14 @@ def train(models = 'linear_planner',epochs = 250, batch_size = 256, lr = 1e-3/2,
         device = torch.device("cpu")
     
 
-    train_dataset = load_data('./drive_data/train',shuffle=True, return_dataloader=False)
+    train_dataset = load_data('./drive_data/train',shuffle=True, return_dataloader=False,transform_pipeline= transform_pipeline)
     train_dataset.transform = transforms.Compose([
         transforms.RandomHorizontalFlip(),
         transforms.RandomResizedCrop(size=(96,128), scale=(0.8, 1.0),antialias=True),  # Random crop with sclare 80% -> 100% with smoothing
         transforms.ColorJitter(0.9, 0.9, 0.9, 0.1), # Random color jitter with brightness, contrast, saturation and hue
         transforms.ToTensor()
     ])
-    valid_dataset = load_data('./drive_data/val',shuffle=False, return_dataloader=False)
+    valid_dataset = load_data('./drive_data/val',shuffle=False, return_dataloader=False,transform_pipeline = 'default')
     
     size = (96,128)
     model = load_model(models,with_weights=False) #.to(device)
