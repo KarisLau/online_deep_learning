@@ -15,7 +15,7 @@ from homework.metrics import PlannerMetric
 from torchvision import transforms
 # homework/datasets/road_dataset.py
 
-class train(models = 'linear_planner',epochs = 250, batch_size = 256, lr = 1e-3/2, weight_decay = 1e-4):
+def train(models = 'linear_planner',epochs = 250, batch_size = 256, lr = 1e-3/2, weight_decay = 1e-4):
     init_lat = 999
     init_long = 999
     
