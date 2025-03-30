@@ -24,6 +24,49 @@ class MLPPlanner(nn.Module):
         self.n_track = n_track
         self.n_waypoints = n_waypoints
 
+        #Code Start
+        self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN))
+        self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
+        class Block(torch.nn.Module):
+            def __init__(self, in_channels, out_channels, stride):
+                super().__init__()
+                kernel_size = 3
+                padding = (kernel_size-1)//2
+
+                self.c1 = torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
+                self.n1 = torch.nn.GroupNorm(1, out_channels)
+                self.c2 = torch.nn.Conv2d(out_channels, out_channels, kernel_size, 1, padding)
+                self.n2 = torch.nn.GroupNorm(1, out_channels)
+                self.relu1 = torch.nn.ReLU()
+                self.relu2 = torch.nn.ReLU()
+
+                self.skip = torch.nn.Conv2d(in_channels, out_channels, 1, stride, 0) if in_channels != out_channels else torch.nn.Identity()
+                # self.pool = nn.MaxPool2d(2, 2)
+
+
+
+            def forward(self, x0):
+                x = self.relu1(self.n1(self.c1(x0)))
+                x = self.relu2(self.n2(self.c2(x)))
+                # x = self.pool(x)
+                return self.skip(x0) + x 
+         
+         # Define the CNN layers
+        
+        channels_l0 = 64
+        cnn_layers = [
+            torch.nn.Conv2d(2 * n_track, channels_l0, kernel_size=11, stride=2, padding=5),
+            torch.nn.ReLU(),
+        ]
+        c1 = channels_l0
+        n_blocks = 3
+        for _ in range(n_blocks):
+            c2 = c1 * 2
+            cnn_layers.append(Block(c1, c2, stride=2))
+            c1 = c2
+        cnn_layers.append(torch.nn.Conv2d(c1, n_waypoints*2, kernel_size=1))
+        self.network = torch.nn.Sequential(*cnn_layers)
+
     def forward(
         self,
         track_left: torch.Tensor,
@@ -43,6 +86,19 @@ class MLPPlanner(nn.Module):
         Returns:
             torch.Tensor: future waypoints with shape (b, n_waypoints, 2)
         """
+        #Code start 
+        #n_track_left =(track_left - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
+        #n_track_right =(track_right - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]   
+        # Concatenate the left and right track points
+        b= track_left.shape[0]
+        combined_track = torch.cat((track_left, track_right), dim=1)  # Shape: (b, n_track * 2, 2)
+        combined_track=combined_track.view(b,-1) #flatten to (b, 2*n_track)
+
+        # x = x.view(x.size(0), 1, -1, 2)  # Flatten to (b, 1, n_track * 2, 2)
+        z = self.network(combined_track)
+        waypoints = z.view(b, self.n_waypoints, 2)  # Reshape to (b, n_waypoints, 2)    
+        
+        return waypoints
         raise NotImplementedError
 
 
@@ -60,6 +116,14 @@ class TransformerPlanner(nn.Module):
 
         self.query_embed = nn.Embedding(n_waypoints, d_model)
 
+        #Code start 
+        self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN))
+        self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
+
+        self.decoder_layer = nn.TransformerDecoderLayer(d_model=d_model, nhead=8)
+        self.num_layers = 6  # Number of decoder layers
+        self.transformer_decoder = nn.TransformerDecoder(self.decoder_layer, self.num_layers)
+
     def forward(
         self,
         track_left: torch.Tensor,
@@ -79,6 +143,26 @@ class TransformerPlanner(nn.Module):
         Returns:
             torch.Tensor: future waypoints with shape (b, n_waypoints, 2)
         """
+        #Code start 
+        #n_track_left =(track_left - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
+        #n_track_right =(track_right - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
+        b, n_track, _ = track_left.shape
+         #Combine left and right track boundaries
+        # Here we can concatenate or process them as needed
+        lane_boundary_features = torch.cat((track_left, track_right), dim=1)  # Shape: (b, 2*n_track, 2)
+        
+        # Create waypoint indices (for the number of waypoints)
+        waypoint_indices = torch.arange(self.n_waypoints).repeat(b, 1)  # Shape: (b, n_waypoints)
+
+        # Get embeddings for the waypoints
+        waypoint_embeds = self.query_embed(waypoint_indices)  # Shape: (b, n_waypoints, embedding_dim)
+
+        # Pass through the transformer decoder
+        output = self.transformer_decoder(waypoint_embeds, lane_boundary_features)
+        
+        # Reshape output to desired shape (b, n_waypoints, 2)
+        # Assuming we want the final output to match the shape of waypoints
+        waypoints = output[:, :self.n_waypoints, :2]  # Adjust as necessary for output shape
         raise NotImplementedError
 
 
@@ -94,6 +178,82 @@ class CNNPlanner(torch.nn.Module):
         self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN), persistent=False)
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD), persistent=False)
 
+        #Code start 
+        self.embed_dim = 128
+        self.num_heads = 8
+        self.num_layers = 4
+
+        class CNNBackbone(torch.nn.Module):
+            class Block(torch.nn.Module):
+                def __init__(self, in_channels, out_channels, stride):
+                    super().__init__()
+                    kernel_size = 3
+                    padding = (kernel_size-1)//2
+
+                    self.c1 = torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
+                    self.n1 = torch.nn.GroupNorm(1, out_channels)
+                    self.c2 = torch.nn.Conv2d(out_channels, out_channels, kernel_size, 1, padding)
+                    self.n2 = torch.nn.GroupNorm(1, out_channels)
+                    self.relu1 = torch.nn.ReLU()
+                    self.relu2 = torch.nn.ReLU()
+
+                    self.skip = torch.nn.Conv2d(in_channels, out_channels, 1, stride, 0) if in_channels != out_channels else torch.nn.Identity()
+                    # self.pool = nn.MaxPool2d(2, 2)
+
+
+
+                def forward(self, x0):
+                    x = self.relu1(self.n1(self.c1(x0)))
+                    x = self.relu2(self.n2(self.c2(x)))
+                    # x = self.pool(x)
+                    return self.skip(x0) + x 
+            
+            # Define the CNN layers
+            
+            channels_l0 = 32
+            cnn_layers = [
+                torch.nn.Conv2d(n_waypoints, channels_l0, kernel_size=3, stride=2, padding=1),
+                torch.nn.ReLU(),
+            ]
+            c1 = channels_l0
+            n_blocks = 3
+            for _ in range(n_blocks):
+                c2 = c1 * 2
+                cnn_layers.append(Block(c1, c2, stride=2))
+                c1 = c2
+            # cnn_layers.append(torch.nn.Conv2d(c1, c1, kernel_size=1))
+            cnn_layers.append(Block(c1, c1, stride=2))
+            self.network = torch.nn.Sequential(*cnn_layers)
+
+        self.backbone = CNNBackbone()
+        class TransformerLayer(torch.nn.Module):
+            def __init__(self, embed_dim, num_heads):
+                super().__init__()
+
+                self.self_att = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
+                self.mlp = torch.nn.Sequential(
+                    torch.nn.Linear(embed_dim, 4 * embed_dim), torch.nn.ReLU(), torch.nn.Linear(4 * embed_dim, embed_dim)
+                )
+                self.in_norm = torch.nn.LayerNorm(embed_dim)
+                self.mlp_norm = torch.nn.LayerNorm(embed_dim)
+
+            def forward(self, x):
+                x_norm = self.in_norm(x)
+                x = x + self.self_att(x_norm, x_norm, x_norm)[0]
+                x = x + self.mlp(self.mlp_norm(x))
+                return x
+
+        class Transformer(torch.nn.Module):
+            def __init__(self, embed_dim, num_heads, num_layers):
+                super().__init__()
+                self.network = torch.nn.Sequential(*[TransformerLayer(embed_dim, num_heads) for _ in range(num_layers)])
+
+            def forward(self, x):
+                return self.network(x)
+        
+        self.transformer = Transformer(self.embed_dim, self.num_heads, self.num_layers)
+        self.fc = torch.nn.Linear(self.embed_dim, 2 * n_waypoints)
+
     def forward(self, image: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Args:
@@ -104,6 +264,32 @@ class CNNPlanner(torch.nn.Module):
         """
         x = image
         x = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
+        #code start
+        features = self.backbone(x)
+        b, c, h, w = features.shape
+        features = features.view(b, c, h * w).permute(2, 0, 1)
+        features = self.transformer(features)
+        features = features.permute(1, 0, 2)
+        waypoints = self.fc(features)
+        waypoints = waypoints.view(b, self.n_waypoints, 2)
+
+        if 1 ==2:  #POE Code 1
+            # Reshape features for the transformer
+            batch_size, channels, height, width = features.size()
+            features = features.permute(0, 2, 3, 1).reshape(batch_size, height * width, channels)  # shape (B, H*W, C)
+
+            # Pass through the transformer
+            transformer_output = self.transformer(features)  # shape (B, H*W, embed_dim)
+
+            # Use the last output from the transformer
+            last_output = transformer_output[:, -1, :]  # shape (B, embed_dim)
+
+            # Predict waypoints
+            waypoints_output = self.fc(last_output)  # shape (B, n_waypoints * 2)
+
+            # Reshape to get the waypoints
+            waypoints_output = waypoints_output.view(-1, self.n_waypoints, 2)  # shape (B, n_waypoints, 2)
+        return waypoints
 
         raise NotImplementedError
 
