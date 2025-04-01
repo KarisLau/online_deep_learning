@@ -189,133 +189,92 @@ class TransformerPlanner(nn.Module):
         raise NotImplementedError
 
 
+class ResNetBlock(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1):
+        super().__init__()
+        self.conv1 = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1)
+        self.bn1 = torch.nn.BatchNorm2d(out_channels)
+        self.conv2 = torch.nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        self.bn2 = torch.nn.BatchNorm2d(out_channels)
+        
+        self.shortcut = torch.nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = torch.nn.Sequential(
+                torch.nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride),
+                torch.nn.BatchNorm2d(out_channels)
+            )
+            
+    def forward(self, x):
+        residual = self.shortcut(x)
+        out = torch.nn.functional.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += residual
+        return torch.nn.functional.relu(out)
+
 class CNNPlanner(torch.nn.Module):
     def __init__(
         self,
         n_waypoints: int = 3,
     ):
         super().__init__()
-
         self.n_waypoints = n_waypoints
 
+        # Normalization parameters
         self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN), persistent=False)
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD), persistent=False)
-
-        #Code start 
-        self.embed_dim = 128
-        self.num_heads = 8
-        self.num_layers = 4
-
-        class CNNBackbone(torch.nn.Module):
-            class Block(torch.nn.Module):
-                def __init__(self, in_channels, out_channels, stride):
-                    super().__init__()
-                    kernel_size = 3
-                    padding = (kernel_size-1)//2
-
-                    self.c1 = torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
-                    self.n1 = torch.nn.GroupNorm(1, out_channels)
-                    self.c2 = torch.nn.Conv2d(out_channels, out_channels, kernel_size, 1, padding)
-                    self.n2 = torch.nn.GroupNorm(1, out_channels)
-                    self.relu1 = torch.nn.ReLU()
-                    self.relu2 = torch.nn.ReLU()
-
-                    self.skip = torch.nn.Conv2d(in_channels, out_channels, 1, stride, 0) if in_channels != out_channels else torch.nn.Identity()
-                    # self.pool = nn.MaxPool2d(2, 2)
-
-
-
-                def forward(self, x0):
-                    x = self.relu1(self.n1(self.c1(x0)))
-                    x = self.relu2(self.n2(self.c2(x)))
-                    # x = self.pool(x)
-                    return self.skip(x0) + x 
-            
-            # Define the CNN layers
-            
-            channels_l0 = 32
-            cnn_layers = [
-                torch.nn.Conv2d(n_waypoints, channels_l0, kernel_size=3, stride=2, padding=1),
-                torch.nn.ReLU(),
-            ]
-            c1 = channels_l0
-            n_blocks = 3
-            for _ in range(n_blocks):
-                c2 = c1 * 2
-                cnn_layers.append(Block(c1, c2, stride=2))
-                c1 = c2
-            # cnn_layers.append(torch.nn.Conv2d(c1, c1, kernel_size=1))
-            cnn_layers.append(Block(c1, c1, stride=2))
-            self.network = torch.nn.Sequential(*cnn_layers)
-
-        self.backbone = CNNBackbone()
-        class TransformerLayer(torch.nn.Module):
-            def __init__(self, embed_dim, num_heads):
-                super().__init__()
-
-                self.self_att = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
-                self.mlp = torch.nn.Sequential(
-                    torch.nn.Linear(embed_dim, 4 * embed_dim), torch.nn.ReLU(), torch.nn.Linear(4 * embed_dim, embed_dim)
-                )
-                self.in_norm = torch.nn.LayerNorm(embed_dim)
-                self.mlp_norm = torch.nn.LayerNorm(embed_dim)
-
-            def forward(self, x):
-                x_norm = self.in_norm(x)
-                x = x + self.self_att(x_norm, x_norm, x_norm)[0]
-                x = x + self.mlp(self.mlp_norm(x))
-                return x
-
-        class Transformer(torch.nn.Module):
-            def __init__(self, embed_dim, num_heads, num_layers):
-                super().__init__()
-                self.network = torch.nn.Sequential(*[TransformerLayer(embed_dim, num_heads) for _ in range(num_layers)])
-
-            def forward(self, x):
-                return self.network(x)
         
-        self.transformer = Transformer(self.embed_dim, self.num_heads, self.num_layers)
-        self.fc = torch.nn.Linear(self.embed_dim, 2 * n_waypoints)
+        # ResNet-like backbone
+        self.in_channels = 16
+        self.conv1 = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1)
+        self.bn1 = torch.nn.BatchNorm2d(16)
+        
+        # ResNet blocks
+        self.layer1 = self._make_layer(16, 2, stride=2)
+        self.layer2 = self._make_layer(32, 2, stride=2)
+        self.layer3 = self._make_layer(64, 2, stride=2)
+        self.layer4 = self._make_layer(128, 2, stride=2)
+        self.layer5 = self._make_layer(256, 2, stride=2)
+        
+        # Global average pooling
+        self.pool = torch.nn.AdaptiveAvgPool2d((1, 1))
+        
+        # Fully connected layers
+        self.fc = torch.nn.Sequential(
+            torch.nn.Linear(256, 128),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.2),
+            torch.nn.Linear(128, 64),
+            torch.nn.ReLU(),
+            torch.nn.Linear(64, n_waypoints * 2)
+        )
+
+    def _make_layer(self, out_channels, num_blocks, stride):
+        strides = [stride] + [1] * (num_blocks - 1)
+        layers = []
+        for stride in strides:
+            layers.append(ResNetBlock(self.in_channels, out_channels, stride))
+            self.in_channels = out_channels
+        return torch.nn.Sequential(*layers)
 
     def forward(self, image: torch.Tensor, **kwargs) -> torch.Tensor:
-        """
-        Args:
-            image (torch.FloatTensor): shape (b, 3, h, w) and vals in [0, 1]
-
-        Returns:
-            torch.FloatTensor: future waypoints with shape (b, n, 2)
-        """
-        x = image
-        x = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
-        #code start
-        features = self.backbone(x)
-        b, c, h, w = features.shape
-        features = features.view(b, c, h * w).permute(2, 0, 1)
-        features = self.transformer(features)
-        features = features.permute(1, 0, 2)
-        waypoints = self.fc(features)
-        waypoints = waypoints.view(b, self.n_waypoints, 2)
-
-        if 1 ==2:  #POE Code 1
-            # Reshape features for the transformer
-            batch_size, channels, height, width = features.size()
-            features = features.permute(0, 2, 3, 1).reshape(batch_size, height * width, channels)  # shape (B, H*W, C)
-
-            # Pass through the transformer
-            transformer_output = self.transformer(features)  # shape (B, H*W, embed_dim)
-
-            # Use the last output from the transformer
-            last_output = transformer_output[:, -1, :]  # shape (B, embed_dim)
-
-            # Predict waypoints
-            waypoints_output = self.fc(last_output)  # shape (B, n_waypoints * 2)
-
-            # Reshape to get the waypoints
-            waypoints_output = waypoints_output.view(-1, self.n_waypoints, 2)  # shape (B, n_waypoints, 2)
-        return waypoints
-
-        raise NotImplementedError
-
+        # Normalize input
+        x = (image - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
+        
+        # Feature extraction
+        x = torch.nn.functional.relu(self.bn1(self.conv1(x)))
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.layer5(x)
+        
+        # Pooling and FC
+        x = self.pool(x)
+        x = x.view(x.size(0), -1)
+        waypoints = self.fc(x)
+        
+        # Reshape output
+        return waypoints.view(-1, self.n_waypoints, 2)
 
 MODEL_FACTORY = {
     "mlp_planner": MLPPlanner,
