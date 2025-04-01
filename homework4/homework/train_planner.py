@@ -15,7 +15,7 @@ from homework.metrics import PlannerMetric
 from torchvision import transforms
 # homework/datasets/road_dataset.py
 
-def train(models="transformer_planner",
+def train(models="cnn_planner",
         transform_pipeline="state_only",
         num_workers=4,
         lr=1e-3,
