@@ -33,20 +33,15 @@ def train(models="transformer_planner",
         print("CUDA not available, using CPU")
         device = torch.device("cpu")
     
-
+    if models == 'cnn_planner':
+        transform_pipeline = 'default'
+        
     train_dataset = load_data('./drive_data/train',shuffle=True, return_dataloader=False,transform_pipeline =transform_pipeline)
-    # train_dataset.transform = transforms.Compose([
-    #     transforms.RandomHorizontalFlip(),
-    #     transforms.RandomResizedCrop(size=(96,128), scale=(0.8, 1.0),antialias=True),  # Random crop with sclare 80% -> 100% with smoothing
-    #     transforms.ColorJitter(0.9, 0.9, 0.9, 0.1), # Random color jitter with brightness, contrast, saturation and hue
-    #     transforms.ToTensor()
-    # ])
+    
     valid_dataset = load_data('./drive_data/val',shuffle=False, return_dataloader=False,transform_pipeline='default')
     
-    # size = (96,128)
-    model = load_model(models,with_weights=False) #.to(device)
+    model = load_model(models,with_weights=False) 
     writer = SummaryWriter()
-    # writer.add_graph(model, torch.zeros(1, 3, *size))
     
     net = model
     net.to(device)
@@ -62,7 +57,6 @@ def train(models="transformer_planner",
 
     for epoch in range(epochs):
         net.train()
-        # train_accuracy = []
         total_loss = 0.0
         train_dm.reset()
         val_dm.reset()
@@ -73,9 +67,14 @@ def train(models="transformer_planner",
             track_right = batch['track_right'].to(device)
             waypoints = batch['waypoints'].to(device)
             waypoints_mask = batch['waypoints_mask'].to(device)
+            if models == 'cnn_planner':
+                image = batch['image'].to(device)
             
             optim.zero_grad()
-            preds = net(track_left, track_right)
+            if models == 'cnn_planner':
+                preds = net(image)
+            else: 
+                preds = net(track_left, track_right)
             
             
             # Compute loss
@@ -97,7 +96,7 @@ def train(models="transformer_planner",
         writer.add_scalar('train/longitudinal_error', train_dm_m['longitudinal_error'], epoch)
         writer.add_scalar('train/lateral_error', train_dm_m['lateral_error'], epoch)
         writer.add_scalar('train/num_samples', train_dm_m['num_samples'], epoch)
-        #print(f"Epoch {epoch+1}/{epochs}, Train Long_Err: {train_dm_m['longitudinal_error']:.4f}, Train Lat Err: {train_dm_m['lateral_error']:.4f}")
+        print(f"Epoch {epoch+1}/{epochs}, Train Long_Err: {train_dm_m['longitudinal_error']:.4f}, Train Lat Err: {train_dm_m['lateral_error']:.4f}")
         writer.flush()
 
         net.eval()
@@ -107,7 +106,11 @@ def train(models="transformer_planner",
                 track_right = batch['track_right'].to(device)
                 waypoints = batch['waypoints'].to(device)
                 waypoints_mask = batch['waypoints_mask'].to(device)
-                preds = net(track_left, track_right)
+                image = batch['image'].to(device)
+                if models == 'cnn_planner':
+                    preds = net(image)
+                else:
+                    preds = net(track_left, track_right)
                 val_dm.add(preds, waypoints, waypoints_mask)
                 
         val_dm_m = val_dm.compute()
@@ -131,14 +134,20 @@ def train(models="transformer_planner",
         now_long_err = val_dm_m['longitudinal_error']
         now_lat_err = val_dm_m['lateral_error']
 
-        if now_long_err <0.2 and now_lat_err <0.6: 
+        if models!='cnn_planner' and now_long_err <0.2 and now_lat_err <0.6: 
           if val_dm_m['longitudinal_error'] < init_long or val_dm_m['lateral_error'] < init_lat:
               init_long = min(init_long, val_dm_m['longitudinal_error'])
               init_lat = min(val_dm_m['lateral_error'], init_lat)
-          
               save_model(net)
-        
               print(f"Epoch {epoch+1} is saved, V Long error: {val_dm_m['longitudinal_error']:.4f}, V Lat Error : {val_dm_m['lateral_error']:.4f}")
+        
+        if models == 'cnn_planner' and now_long_err <0.4 and now_lat_err <0.45: 
+          if val_dm_m['longitudinal_error'] < init_long or val_dm_m['lateral_error'] < init_lat:
+              init_long = min(init_long, val_dm_m['longitudinal_error'])
+              init_lat = min(val_dm_m['lateral_error'], init_lat)
+              save_model(net)
+              print(f"Epoch {epoch+1} is saved, V Long error: {val_dm_m['longitudinal_error']:.4f}, V Lat Error : {val_dm_m['lateral_error']:.4f}")
+        
         
         
 
