@@ -15,10 +15,10 @@ from homework.metrics import PlannerMetric
 from torchvision import transforms
 # homework/datasets/road_dataset.py
 
-def train(models="mlp_planner",
+def train(models="transformer_planner",
         transform_pipeline="state_only",
         num_workers=4,
-        lr=1e-4,
+        lr=1e-3,
         batch_size=128,
         epochs=100,weight_decay = 1e-2):
     init_lat = 999
@@ -127,6 +127,18 @@ def train(models="mlp_planner",
             save_model(net)
         
             print(f"Epoch {epoch+1} is saved, V Long error: {val_dm_m['longitudinal_error']:.4f}, V Lat Error : {val_dm_m['lateral_error']:.4f}")
+        
+        now_long_err = val_dm_m['longitudinal_error']
+        now_lat_err = val_dm_m['lateral_error']
+
+        if now_long_err <0.2 and now_lat_err <0.6: 
+          if val_dm_m['longitudinal_error'] < init_long or val_dm_m['lateral_error'] < init_lat:
+              init_long = min(init_long, val_dm_m['longitudinal_error'])
+              init_lat = min(val_dm_m['lateral_error'], init_lat)
+          
+              save_model(net)
+        
+              print(f"Epoch {epoch+1} is saved, V Long error: {val_dm_m['longitudinal_error']:.4f}, V Lat Error : {val_dm_m['lateral_error']:.4f}")
         
         
 
