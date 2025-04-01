@@ -25,47 +25,58 @@ class MLPPlanner(nn.Module):
         self.n_waypoints = n_waypoints
 
         #Code Start
-        self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN))
-        self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
-        class Block(torch.nn.Module):
-            def __init__(self, in_channels, out_channels, stride):
-                super().__init__()
-                kernel_size = 3
-                padding = (kernel_size-1)//2
-
-                self.c1 = torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
-                self.n1 = torch.nn.GroupNorm(1, out_channels)
-                self.c2 = torch.nn.Conv2d(out_channels, out_channels, kernel_size, 1, padding)
-                self.n2 = torch.nn.GroupNorm(1, out_channels)
-                self.relu1 = torch.nn.ReLU()
-                self.relu2 = torch.nn.ReLU()
-
-                self.skip = torch.nn.Conv2d(in_channels, out_channels, 1, stride, 0) if in_channels != out_channels else torch.nn.Identity()
-                # self.pool = nn.MaxPool2d(2, 2)
-
-
-
-            def forward(self, x0):
-                x = self.relu1(self.n1(self.c1(x0)))
-                x = self.relu2(self.n2(self.c2(x)))
-                # x = self.pool(x)
-                return self.skip(x0) + x 
-         
-         # Define the CNN layers
         
-        channels_l0 = 64
-        cnn_layers = [
-            torch.nn.Conv2d(2 * n_track, channels_l0, kernel_size=11, stride=2, padding=5),
-            torch.nn.ReLU(),
-        ]
-        c1 = channels_l0
-        n_blocks = 3
-        for _ in range(n_blocks):
-            c2 = c1 * 2
-            cnn_layers.append(Block(c1, c2, stride=2))
+        class ResidualMLPBlock(nn.Module):
+            """MLP block with residual connection"""
+            def __init__(self, input_dim, output_dim, dropout=0.0):
+                super().__init__()
+                # Only add residual if dimensions match
+                self.use_residual = (input_dim == output_dim)
+                
+                self.linear1 = nn.Linear(input_dim, output_dim)
+                self.linear2 = nn.Linear(output_dim, output_dim)
+                self.activation = nn.ReLU()
+                self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+                
+                # Optional projection for residual if dimensions don't match
+                if input_dim != output_dim:
+                    self.residual_proj = nn.Linear(input_dim, output_dim)
+                else:
+                    self.residual_proj = nn.Identity()
+
+            def forward(self, x):
+                residual = self.residual_proj(x)
+                
+                out = self.linear1(x)
+                out = self.activation(out)
+                out = self.dropout(out)
+                
+                out = self.linear2(out)
+                
+                # Add residual connection
+                out = out + residual
+                out = self.activation(out)
+                
+                return out
+
+         # Input size: 2 tracks * n_track points * 2 coordinates
+        input_size = 2 * n_track * 2
+        
+        # Build MLP blocks
+        mlp_layers = []
+        c1 = input_size
+        
+        dropout = 0.1
+        block =3 
+        for _ in range(block): 
+            c2 = c1 // 2
+            mlp_layers.append(ResidualMLPBlock(c1, c2, dropout))
             c1 = c2
-        cnn_layers.append(torch.nn.Conv2d(c1, n_waypoints*2, kernel_size=1))
-        self.network = torch.nn.Sequential(*cnn_layers)
+        
+        # Final output layer
+        mlp_layers.append(nn.Linear(c1, n_waypoints * 2))
+        
+        self.mlp = nn.Sequential(*mlp_layers)
 
     def forward(
         self,
@@ -87,17 +98,15 @@ class MLPPlanner(nn.Module):
             torch.Tensor: future waypoints with shape (b, n_waypoints, 2)
         """
         #Code start 
-        #n_track_left =(track_left - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
-        #n_track_right =(track_right - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]   
-        # Concatenate the left and right track points
-        b= track_left.shape[0]
-        combined_track = torch.cat((track_left, track_right), dim=1)  # Shape: (b, n_track * 2, 2)
-        combined_track=combined_track.view(b,-1) #flatten to (b, 2*n_track)
-
-        # x = x.view(x.size(0), 1, -1, 2)  # Flatten to (b, 1, n_track * 2, 2)
-        z = self.network(combined_track)
-        waypoints = z.view(b, self.n_waypoints, 2)  # Reshape to (b, n_waypoints, 2)    
+        batch_size = track_left.shape[0]
+        # Flatten the track points
+        x = torch.cat([track_left, track_right], dim=1)  # (b, 2*n_track, 2)
+        x = x.view(batch_size, -1)  # (b, 2*n_track*2)
         
+        # Pass through MLP
+        out = self.mlp(x)  # (b, n_waypoints*2)
+        waypoints= out.view(batch_size, self.n_waypoints, 2)
+
         return waypoints
         raise NotImplementedError
 
@@ -117,12 +126,27 @@ class TransformerPlanner(nn.Module):
         self.query_embed = nn.Embedding(n_waypoints, d_model)
 
         #Code start 
-        self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN))
-        self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
+        self.input_proj = nn.Linear(2, d_model)
 
-        self.decoder_layer = nn.TransformerDecoderLayer(d_model=d_model, nhead=8)
-        self.num_layers = 6  # Number of decoder layers
-        self.transformer_decoder = nn.TransformerDecoder(self.decoder_layer, self.num_layers)
+        nhead=4
+        dim_feedforward=256
+        dropout=0.1
+        num_layers=3
+        # Transformer decoder
+        decoder_layer = nn.TransformerDecoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            batch_first=True
+        )
+        self.transformer_decoder = nn.TransformerDecoder(
+            decoder_layer,
+            num_layers=num_layers
+        )
+
+        # Output projection
+        self.output_proj = nn.Linear(d_model, 2)
 
     def forward(
         self,
@@ -144,25 +168,24 @@ class TransformerPlanner(nn.Module):
             torch.Tensor: future waypoints with shape (b, n_waypoints, 2)
         """
         #Code start 
-        #n_track_left =(track_left - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
-        #n_track_right =(track_right - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
-        b, n_track, _ = track_left.shape
-         #Combine left and right track boundaries
-        # Here we can concatenate or process them as needed
-        lane_boundary_features = torch.cat((track_left, track_right), dim=1)  # Shape: (b, 2*n_track, 2)
-        
-        # Create waypoint indices (for the number of waypoints)
-        waypoint_indices = torch.arange(self.n_waypoints).repeat(b, 1)  # Shape: (b, n_waypoints)
+        batch_size = track_left.shape[0]
 
-        # Get embeddings for the waypoints
-        waypoint_embeds = self.query_embed(waypoint_indices)  # Shape: (b, n_waypoints, embedding_dim)
+        # Combine and project track points (B, 2*n_track, d_model)
+        track_points = torch.cat([track_left, track_right], dim=1)
+        track_points = self.input_proj(track_points)  # (B, 2*n_track, d_model)
 
-        # Pass through the transformer decoder
-        output = self.transformer_decoder(waypoint_embeds, lane_boundary_features)
-        
-        # Reshape output to desired shape (b, n_waypoints, 2)
-        # Assuming we want the final output to match the shape of waypoints
-        waypoints = output[:, :self.n_waypoints, :2]  # Adjust as necessary for output shape
+        # Get query embeddings (n_waypoints, d_model) -> (B, n_waypoints, d_model)
+        queries = self.query_embed.weight.unsqueeze(0).expand(batch_size, -1, -1)
+
+        # Transformer decoder (cross-attention: queries attend to track_points)
+        waypoint_features = self.transformer_decoder(
+            tgt=queries,
+            memory=track_points
+        )  # (B, n_waypoints, d_model)
+
+        # Project to output coordinates
+        waypoints = self.output_proj(waypoint_features)  # (B, n_waypoints, 2)
+        return waypoints
         raise NotImplementedError
 
 
