@@ -29,19 +29,19 @@ def train(models = 'linear_planner',epochs = 250, batch_size = 256, lr = 1e-3/2,
         device = torch.device("cpu")
     
 
-    train_dataset = load_data('./drive_data/train',shuffle=True, return_dataloader=False,transform_pipeline= transform_pipeline)
-    train_dataset.transform = transforms.Compose([
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomResizedCrop(size=(96,128), scale=(0.8, 1.0),antialias=True),  # Random crop with sclare 80% -> 100% with smoothing
-        transforms.ColorJitter(0.9, 0.9, 0.9, 0.1), # Random color jitter with brightness, contrast, saturation and hue
-        transforms.ToTensor()
-    ])
-    valid_dataset = load_data('./drive_data/val',shuffle=False, return_dataloader=False,transform_pipeline = 'default')
+    train_dataset = load_data('./drive_data/train',shuffle=True, return_dataloader=False,transform_pipeline =transform_pipeline)
+    # train_dataset.transform = transforms.Compose([
+    #     transforms.RandomHorizontalFlip(),
+    #     transforms.RandomResizedCrop(size=(96,128), scale=(0.8, 1.0),antialias=True),  # Random crop with sclare 80% -> 100% with smoothing
+    #     transforms.ColorJitter(0.9, 0.9, 0.9, 0.1), # Random color jitter with brightness, contrast, saturation and hue
+    #     transforms.ToTensor()
+    # ])
+    valid_dataset = load_data('./drive_data/val',shuffle=False, return_dataloader=False,transform_pipeline='default')
     
-    size = (96,128)
+    # size = (96,128)
     model = load_model(models,with_weights=False) #.to(device)
     writer = SummaryWriter()
-    writer.add_graph(model, torch.zeros(1, 3, *size))
+    # writer.add_graph(model, torch.zeros(1, 3, *size))
     
     net = model
     net.to(device)
@@ -49,8 +49,8 @@ def train(models = 'linear_planner',epochs = 250, batch_size = 256, lr = 1e-3/2,
     val_dm = PlannerMetric()
 
     optim = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=weight_decay)
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8)
-    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size, num_workers=8)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size, num_workers=num_workers)
 
     global_step = 0
     # print(seg_weight)
@@ -68,11 +68,11 @@ def train(models = 'linear_planner',epochs = 250, batch_size = 256, lr = 1e-3/2,
             track_right = batch['track_right'].to(device)
             waypoints = batch['waypoints'].to(device)
             waypoints_mask = batch['waypoints_mask'].to(device)
+            
             optim.zero_grad()
-            
-            # Forward pass
-            
             preds = net(track_left, track_right)
+            
+            
             # Compute loss
             loss = abs(preds - waypoints).mean()
             loss.backward()
@@ -82,17 +82,17 @@ def train(models = 'linear_planner',epochs = 250, batch_size = 256, lr = 1e-3/2,
             writer.add_scalar("train/loss", loss.item(), global_step)
             global_step += 1
 
-            # "l1_error": float(l1_error),
-            # "longitudinal_error": float(longitudinal_error),
-            # "lateral_error": float(lateral_error),
-            # "num_samples": self.total,
+        #     # "l1_error": float(l1_error),
+        #     # "longitudinal_error": float(longitudinal_error),
+        #     # "lateral_error": float(lateral_error),
+        #     # "num_samples": self.total,
         
         train_dm_m = train_dm.compute()
         writer.add_scalar('train/l1_error', train_dm_m['l1_error'], epoch)
         writer.add_scalar('train/longitudinal_error', train_dm_m['longitudinal_error'], epoch)
         writer.add_scalar('train/lateral_error', train_dm_m['lateral_error'], epoch)
         writer.add_scalar('train/num_samples', train_dm_m['num_samples'], epoch)
-        print(f"Epoch {epoch+1}/{epochs}, Train Long_Err: {train_dm_m['longitudinal_error']:.4f}, Train Lat Err: {train_dm_m['lateral_error']:.4f}")
+        #print(f"Epoch {epoch+1}/{epochs}, Train Long_Err: {train_dm_m['longitudinal_error']:.4f}, Train Lat Err: {train_dm_m['lateral_error']:.4f}")
         writer.flush()
 
         net.eval()
