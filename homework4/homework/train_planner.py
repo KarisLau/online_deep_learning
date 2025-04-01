@@ -20,7 +20,7 @@ def train(models="mlp_planner",
         num_workers=4,
         lr=1e-4,
         batch_size=128,
-        epochs=40,weight_decay = 1e-4):
+        epochs=100,weight_decay = 1e-2):
     init_lat = 999
     init_long = 999
     

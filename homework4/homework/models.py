@@ -66,8 +66,8 @@ class MLPPlanner(nn.Module):
         mlp_layers = []
         c1 = input_size
         
-        dropout = 0.1
-        block =3 
+        dropout = 0
+        block =4
         for _ in range(block): 
             c2 = c1 // 2
             mlp_layers.append(ResidualMLPBlock(c1, c2, dropout))
@@ -130,7 +130,7 @@ class TransformerPlanner(nn.Module):
 
         nhead=4
         dim_feedforward=256
-        dropout=0.1
+        dropout=0
         num_layers=3
         # Transformer decoder
         decoder_layer = nn.TransformerDecoderLayer(
