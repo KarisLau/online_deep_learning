@@ -96,7 +96,7 @@ def train(models="cnn_planner",
         writer.add_scalar('train/longitudinal_error', train_dm_m['longitudinal_error'], epoch)
         writer.add_scalar('train/lateral_error', train_dm_m['lateral_error'], epoch)
         writer.add_scalar('train/num_samples', train_dm_m['num_samples'], epoch)
-        print(f"Epoch {epoch+1}/{epochs}, Train Long_Err: {train_dm_m['longitudinal_error']:.4f}, Train Lat Err: {train_dm_m['lateral_error']:.4f}")
+        #print(f"Epoch {epoch+1}/{epochs}, Train Long_Err: {train_dm_m['longitudinal_error']:.4f}, Train Lat Err: {train_dm_m['lateral_error']:.4f}")
         writer.flush()
 
         net.eval()
